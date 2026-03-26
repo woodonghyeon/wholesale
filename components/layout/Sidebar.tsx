@@ -77,6 +77,14 @@ const NAV_GROUPS: NavGroup[] = [
       { href: '/alerts', label: '알림 센터' },
     ],
   },
+  {
+    key: 'system',
+    label: '시스템',
+    icon: '◈',
+    items: [
+      { href: '/logs', label: '시스템 로그' },
+    ],
+  },
 ]
 
 function findActiveGroup(pathname: string): string | null {

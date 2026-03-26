@@ -6,6 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { logActivity } from '@/lib/supabase/logs'
 
 const SAVED_EMAIL_KEY = 'wholesale_saved_email'
 
@@ -58,8 +59,10 @@ export default function LoginPage() {
     })
     if (error) {
       setError('이메일 또는 비밀번호가 올바르지 않습니다.')
+      await logActivity({ action_type: 'auth.login', resource_type: 'auth', description: `로그인 실패: ${data.email}`, metadata: { email: data.email, reason: 'invalid_credentials' } })
       return
     }
+    await logActivity({ action_type: 'auth.login', resource_type: 'auth', description: `로그인: ${data.email}`, metadata: { email: data.email } })
     // 아이디 저장
     if (rememberEmail) {
       localStorage.setItem(SAVED_EMAIL_KEY, data.email)
@@ -82,6 +85,7 @@ export default function LoginPage() {
       setError(error.message)
       return
     }
+    await logActivity({ action_type: 'auth.signup', resource_type: 'auth', description: `회원가입: ${data.email}`, metadata: { email: data.email } })
     setSuccess('가입 확인 이메일을 발송했습니다. 이메일을 확인해주세요.')
     signupForm.reset()
   }

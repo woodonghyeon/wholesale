@@ -1,6 +1,6 @@
 # 도매 통합 관리 시스템 — 기능 현황
 
-> 마지막 업데이트: 2026-03-26
+> 마지막 업데이트: 2026-03-26 (시스템 로그 추가)
 
 ---
 
@@ -65,6 +65,13 @@
 | 이메일 저장 (localStorage) | 자동 체크 |
 | 자동 로그인 (세션 감지) | 대시보드 리다이렉트 |
 
+### 📌 시스템 로그
+| 기능 | 경로 | 비고 |
+|------|------|------|
+| 활동 로그 (CRUD 이벤트) | `/logs` | 액션/리소스/날짜 필터 |
+| 인증 로그 (로그인/가입 이력) | `/logs` | 기기·UA 파싱, 성공/실패 |
+| 실시간 터미널 | `/logs` | Supabase Realtime 스트림 |
+
 ### 📌 대시보드
 | 기능 | 비고 |
 |------|------|
@@ -122,7 +129,7 @@
 | 파일 | 설명 | 상태 |
 |------|------|------|
 | `supabase/seed.sql` | 더미 데이터 100건 | ✅ 실행 완료 |
-| `supabase/functions.sql` | `adjust_inventory` RPC 함수 | ⚠️ **Supabase SQL Editor에서 실행 필요** |
+| `supabase/functions.sql` | `adjust_inventory` RPC + `activity_logs` 테이블 | ⚠️ **재실행 필요** (activity_logs 추가됨) |
 
 ### adjust_inventory 함수 실행 방법
 1. Supabase 프로젝트 → SQL Editor
@@ -166,4 +173,5 @@
 /reports            종합 보고서
 /alerts             알림 센터
 /settings           기준정보 설정
+/logs               시스템 로그
 ```
