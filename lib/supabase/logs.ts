@@ -57,7 +57,7 @@ export async function logActivity(opts: {
       resource_type: opts.resource_type ?? null,
       resource_id: opts.resource_id ?? null,
       description: opts.description,
-      metadata: opts.metadata ?? {},
+      metadata: { ...opts.metadata ?? {}, _email: user?.email ?? null },
       user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
     })
   } catch {

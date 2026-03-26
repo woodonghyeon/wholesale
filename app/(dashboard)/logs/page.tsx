@@ -75,12 +75,14 @@ function parseUA(ua: string): string {
 function TerminalLine({ log }: { log: ActivityLog }) {
   const color = ACTION_COLOR[log.action_type] ?? 'text-gray-300'
   const ts = new Date(log.created_at).toLocaleTimeString('ko-KR', { hour12: false })
+  const email = (log.metadata as any)?._email as string | null
   return (
     <div className="font-mono text-xs leading-5 hover:bg-white/5 px-2 py-0.5 rounded">
       <span className="text-gray-500 select-none">[{ts}] </span>
       <span className={`${color} font-bold`}>{log.action_type.toUpperCase().padEnd(13, ' ')}</span>
       {log.resource_type && <span className="text-gray-400">[{log.resource_type}] </span>}
       <span className="text-gray-200">{log.description}</span>
+      {email && <span className="text-cyan-700 ml-2">@{email.split('@')[0]}</span>}
       {log.user_agent && (
         <span className="text-gray-600 ml-2 text-[10px]">• {parseUA(log.user_agent)}</span>
       )}
@@ -501,24 +503,28 @@ function ActivityTable({ logs, loading }: { logs: ActivityLog[]; loading: boolea
     <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
       <table className="w-full text-sm">
         <thead className="bg-gray-50 text-xs text-gray-500">
-          <tr>{['시각','액션','리소스','설명','변경 내용'].map(h => (
+          <tr>{['시각','사용자','액션','리소스','설명','변경 내용'].map(h => (
             <th key={h} className="px-4 py-3 text-left font-medium">{h}</th>
           ))}</tr>
         </thead>
         <tbody className="divide-y divide-gray-50">
-          {loading && <tr><td colSpan={5} className="py-12 text-center text-sm text-gray-400">불러오는 중...</td></tr>}
+          {loading && <tr><td colSpan={6} className="py-12 text-center text-sm text-gray-400">불러오는 중...</td></tr>}
           {!loading && logs.length === 0 && (
-            <tr><td colSpan={5} className="py-12 text-center text-sm text-gray-400">
+            <tr><td colSpan={6} className="py-12 text-center text-sm text-gray-400">
               활동 로그가 없습니다<br />
               <span className="text-xs text-gray-300">거래 입력, 재고 조정 등의 작업이 여기 기록됩니다</span>
             </td></tr>
           )}
           {logs.map(log => {
+            const email = (log.metadata as any)?._email as string | null
             const diff = (log.metadata as any)?.diff
             const hasDiff = diff && Object.keys(diff).length > 0
             return (
               <tr key={log.id} className="hover:bg-gray-50">
                 <td className="px-4 py-2.5 font-mono text-xs text-gray-500 whitespace-nowrap">{formatTs(log.created_at)}</td>
+                <td className="px-4 py-2.5 text-xs text-gray-600 max-w-[140px] truncate" title={email ?? ''}>
+                  {email ?? <span className="text-gray-300">-</span>}
+                </td>
                 <td className="px-4 py-2.5">
                   <span className={`text-xs px-2 py-0.5 rounded-full ${ACTION_BADGE[log.action_type] ?? 'bg-gray-100 text-gray-600'}`}>
                     {log.action_type}
@@ -527,7 +533,7 @@ function ActivityTable({ logs, loading }: { logs: ActivityLog[]; loading: boolea
                 <td className="px-4 py-2.5 text-xs text-gray-500">
                   {log.resource_type ? RESOURCE_LABEL[log.resource_type] ?? log.resource_type : '-'}
                 </td>
-                <td className="px-4 py-2.5 text-gray-700 max-w-[240px] truncate">{log.description ?? '-'}</td>
+                <td className="px-4 py-2.5 text-gray-700 max-w-[200px] truncate">{log.description ?? '-'}</td>
                 <td className="px-4 py-2.5">
                   {hasDiff && (
                     <details className="text-xs text-gray-400 cursor-pointer">
