@@ -37,6 +37,8 @@
 | 재고 현황 (창고별/사업자별) | `/inventory` | 부족 재고 하이라이트 |
 | 재고 조정 (입고/출고/조정) | `/inventory` | adjust_inventory RPC |
 | 재고 실사 (세션 생성→수량 입력→조정 적용) | `/stocktake` | - |
+| 일/월별 수불 현황 (입고/출고/조정/반품) | `/stock-ledger` | stock_logs 기반, 탭 전환 |
+| 다단가 관리 (거래처·채널별 단가 등록) | `/price-list` | 표준단가 대비 차이 표시 |
 
 ### 📌 자금
 | 기능 | 경로 | 비고 |
@@ -49,6 +51,7 @@
 | 기능 | 경로 | 비고 |
 |------|------|------|
 | 거래처 관리 (검색/유형 필터) | `/partners` | - |
+| 거래처별 판매 원장 (누계 잔액) | `/partner-ledger` | 매출/매입 이력 + 누계 |
 | 정기 고객 (주문 주기·D-Day) | `/customers` | 알림 연동 |
 
 ### 📌 보고서 / 알림
@@ -56,7 +59,8 @@
 |------|------|------|
 | 연간 월별 손익 보고서 (차트+표) | `/reports` | 쿼리 2회 최적화 |
 | 매출 TOP 10 상품 | `/reports` | - |
-| 알림 센터 (부족재고/미수금/반품/발주) | `/alerts` | - |
+| 분기별 매출·매입 집계표 (인쇄 지원) | `/quarterly` | 세무 신고용, Q1~Q4 카드 |
+| 알림 센터 (부족재고/어음만기/미수금연체/반품/발주) | `/alerts` | 어음·미수금 연체 알림 추가 |
 
 ### 📌 인증
 | 기능 | 비고 |
@@ -94,11 +98,11 @@
 ### 🟠 높은 우선순위
 | 기능 | 설명 |
 |------|------|
-| **일/월별 수불 현황** | 상품별 입출고 이력 보고서 (stock_logs 기반) |
-| **채널별/거래처별 다단가 관리** | 거래처마다 다른 판매가 자동 적용 |
+| ~~일/월별 수불 현황~~ | ✅ 구현 완료 `/stock-ledger` |
+| ~~채널별/거래처별 다단가 관리~~ | ✅ 구현 완료 `/price-list` |
+| ~~거래처별 판매 원장~~ | ✅ 구현 완료 `/partner-ledger` |
 | **품목별 가격표 출력** | 채널별 단가표 인쇄/PDF |
 | **영업사원 실적 관리** | 사원별 매출/수금/이익 현황 |
-| **거래처별 판매 원장** | 거래처 단위 매출 전체 이력 |
 
 ### 🟡 중간 우선순위
 | 기능 | 설명 |
@@ -129,7 +133,7 @@
 | 파일 | 설명 | 상태 |
 |------|------|------|
 | `supabase/seed.sql` | 더미 데이터 100건 | ✅ 실행 완료 |
-| `supabase/functions.sql` | `adjust_inventory` RPC + `activity_logs` 테이블 | ⚠️ **재실행 필요** (activity_logs 추가됨) |
+| `supabase/functions.sql` | `adjust_inventory` RPC + `activity_logs` + `partner_prices` 테이블 | ⚠️ **재실행 필요** (partner_prices 추가됨) |
 
 ### adjust_inventory 함수 실행 방법
 1. Supabase 프로젝트 → SQL Editor
@@ -161,8 +165,11 @@
 /purchase           매입 현황
 /inventory          재고 현황
 /stocktake          재고 실사
+/stock-ledger       수불 현황 (일/월별)       ← NEW
 /products           상품 관리
+/price-list         다단가 관리               ← NEW
 /partners           거래처 관리
+/partner-ledger     거래처별 판매 원장         ← NEW
 /quotes             견적·발주
 /returns            반품 관리
 /cash               현금 출납
@@ -171,7 +178,8 @@
 /tax                세금계산서
 /customers          정기 고객
 /reports            종합 보고서
-/alerts             알림 센터
+/quarterly          분기별 집계표             ← NEW
+/alerts             알림 센터 (고도화)
 /settings           기준정보 설정
 /logs               시스템 로그
 ```
