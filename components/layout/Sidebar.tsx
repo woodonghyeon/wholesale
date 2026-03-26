@@ -46,7 +46,9 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: '/inventory', label: '재고 현황' },
       { href: '/stocktake', label: '재고 실사' },
+      { href: '/stock-ledger', label: '수불 현황' },
       { href: '/products', label: '상품 관리' },
+      { href: '/price-list', label: '다단가 관리' },
     ],
   },
   {
@@ -65,6 +67,7 @@ const NAV_GROUPS: NavGroup[] = [
     icon: '◎',
     items: [
       { href: '/partners', label: '거래처 관리' },
+      { href: '/partner-ledger', label: '거래처 원장' },
       { href: '/customers', label: '정기 고객' },
     ],
   },
@@ -74,6 +77,7 @@ const NAV_GROUPS: NavGroup[] = [
     icon: '⊕',
     items: [
       { href: '/reports', label: '종합 보고서' },
+      { href: '/quarterly', label: '분기별 집계표' },
       { href: '/alerts', label: '알림 센터' },
     ],
   },

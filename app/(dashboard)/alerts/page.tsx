@@ -95,6 +95,58 @@ export default function AlertsPage() {
         })
       }
 
+      // 5. 어음 만기 임박 (14일 이내)
+      let noteQ = supabase.from('notes').select('id, due_date, amount, partners(name)').eq('status', 'pending')
+      if (biz) noteQ = noteQ.eq('business_id', biz)
+      const { data: noteData } = await noteQ
+      const dueNotes = (noteData ?? []).filter((r: any) => {
+        if (!r.due_date) return false
+        const daysLeft = Math.ceil((new Date(r.due_date).getTime() - today.getTime()) / 86400000)
+        return daysLeft <= 14
+      })
+      const overdueNotes = dueNotes.filter((r: any) => new Date(r.due_date) < today)
+      if (overdueNotes.length > 0) {
+        result.push({
+          type: 'overdue_order' as any, severity: 'high',
+          title: `어음 만기 초과 ${overdueNotes.length}건`,
+          description: overdueNotes.slice(0, 3).map((r: any) =>
+            `${r.partners?.name ?? '(미지정)'} ${(r.amount as number).toLocaleString()}원`
+          ).join(', '),
+          href: '/notes',
+        })
+      }
+      const imminentNotes = dueNotes.filter((r: any) => new Date(r.due_date) >= today)
+      if (imminentNotes.length > 0) {
+        result.push({
+          type: 'due_customer' as any, severity: 'medium',
+          title: `어음 만기 임박 ${imminentNotes.length}건 (14일 이내)`,
+          description: imminentNotes.slice(0, 3).map((r: any) => {
+            const d = Math.ceil((new Date(r.due_date).getTime() - today.getTime()) / 86400000)
+            return `${r.partners?.name ?? '(미지정)'} D-${d}`
+          }).join(', '),
+          href: '/notes',
+        })
+      }
+
+      // 6. 미수금 연체 (매출 후 30일 초과 외상)
+      let slipQ = supabase
+        .from('slips')
+        .select('id, slip_date, total_amount, partners(name)')
+        .eq('slip_type', 'sale')
+        .eq('payment_type', 'credit')
+        .lte('slip_date', new Date(today.getTime() - 30 * 86400000).toISOString().slice(0, 10))
+      if (biz) slipQ = slipQ.eq('business_id', biz)
+      const { data: overdueSlips } = await slipQ
+      if (overdueSlips && overdueSlips.length > 0) {
+        const total = (overdueSlips as any[]).reduce((sum, r) => sum + r.total_amount, 0)
+        result.push({
+          type: 'low_stock' as any, severity: 'high',
+          title: `미수금 연체 ${overdueSlips.length}건 (30일 초과)`,
+          description: `총 ${total.toLocaleString()}원 — ` + (overdueSlips as any[]).slice(0, 3).map((r: any) => r.partners?.name ?? '(미지정)').join(', '),
+          href: '/receivables',
+        })
+      }
+
       setAlerts(result)
     } catch (e: unknown) { toast.error((e as Error).message) }
     finally { setLoading(false) }

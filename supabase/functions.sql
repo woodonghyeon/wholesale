@@ -48,6 +48,31 @@ GRANT EXECUTE ON FUNCTION public.adjust_inventory TO authenticated;
 GRANT EXECUTE ON FUNCTION public.adjust_inventory TO anon;
 
 -- ============================================================
+-- 거래처·채널별 다단가 테이블 (partner_prices)
+-- 거래 입력 시 거래처/채널 조합으로 단가 자동 조회
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS public.partner_prices (
+  id          uuid        DEFAULT gen_random_uuid() PRIMARY KEY,
+  partner_id  uuid        REFERENCES public.partners(id) ON DELETE CASCADE,
+  product_id  uuid        NOT NULL REFERENCES public.products(id) ON DELETE CASCADE,
+  channel_id  uuid        REFERENCES public.channels(id) ON DELETE SET NULL,
+  unit_price  integer     NOT NULL CHECK (unit_price >= 0),
+  note        text,
+  created_at  timestamptz DEFAULT now(),
+  updated_at  timestamptz DEFAULT now(),
+  UNIQUE (partner_id, product_id, channel_id)
+);
+
+CREATE INDEX IF NOT EXISTS partner_prices_partner_idx ON public.partner_prices (partner_id);
+CREATE INDEX IF NOT EXISTS partner_prices_product_idx ON public.partner_prices (product_id);
+
+ALTER TABLE public.partner_prices ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "authenticated can manage partner_prices" ON public.partner_prices;
+CREATE POLICY "authenticated can manage partner_prices"
+  ON public.partner_prices FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+-- ============================================================
 -- 활동 로그 테이블 (activity_logs)
 -- 로그인/회원가입/CRUD 이벤트를 시간별로 수집
 -- ============================================================
