@@ -5,8 +5,14 @@ import { toast } from 'sonner'
 import PageHeader from '@/components/ui/PageHeader'
 import {
   getActivityLogs, getStockLogs, subscribeToLogs,
-  ActivityLog, StockLogRow, ActionType,
+  ActivityLog, StockLogRow,
 } from '@/lib/supabase/logs'
+import type { ServerLogEntry } from '@/lib/server/log-store'
+
+// ─── 터미널 통합 엔트리 타입 ─────────────────────────────────
+type TermEntry =
+  | { kind: 'server'; log: ServerLogEntry }
+  | { kind: 'activity'; log: ActivityLog }
 
 // ─── 상수 ────────────────────────────────────────────────
 const ACTION_BADGE: Record<string, string> = {
@@ -72,22 +78,86 @@ function parseUA(ua: string): string {
 }
 
 // ─── 터미널 행 ───────────────────────────────────────────
-function TerminalLine({ log }: { log: ActivityLog }) {
+function statusColor(s?: number) {
+  if (!s) return 'text-gray-500'
+  if (s < 300) return 'text-green-400'
+  if (s < 400) return 'text-cyan-400'
+  if (s < 500) return 'text-yellow-400'
+  return 'text-red-400'
+}
+const METHOD_COLOR: Record<string, string> = {
+  GET: 'text-blue-400', POST: 'text-green-400', PUT: 'text-yellow-400',
+  PATCH: 'text-yellow-400', DELETE: 'text-red-400', OPTIONS: 'text-gray-500',
+}
+
+function ServerLine({ log }: { log: ServerLogEntry }) {
+  const ts = new Date(log.ts).toLocaleTimeString('ko-KR', { hour12: false })
+  if (log.type === 'http') {
+    const sc = statusColor(log.status)
+    const mc = METHOD_COLOR[log.method ?? ''] ?? 'text-gray-300'
+    return (
+      <div className="font-mono text-xs leading-5 hover:bg-white/5 px-2 py-0.5 rounded">
+        <span className="text-gray-600 select-none">[{ts}] </span>
+        <span className="text-gray-500 text-[10px] mr-1">HTTP</span>
+        <span className={`${mc} font-bold w-8 inline-block`}>{log.method}</span>
+        <span className="text-gray-300 ml-1">{log.path}</span>
+        <span className="mx-1 text-gray-600">→</span>
+        <span className={`${sc} font-bold`}>{log.status}</span>
+        {log.duration !== undefined && (
+          <span className="text-gray-600 ml-1 text-[10px]">{log.duration}ms</span>
+        )}
+        {log.ip && log.ip !== 'local' && (
+          <span className="text-gray-700 ml-2 text-[10px]">• {log.ip}</span>
+        )}
+      </div>
+    )
+  }
+  if (log.type === 'error') {
+    return (
+      <div className="font-mono text-xs leading-5 hover:bg-white/5 px-2 py-0.5 rounded">
+        <span className="text-gray-600 select-none">[{ts}] </span>
+        <span className="text-red-500 font-bold">ERROR{'        '}</span>
+        <span className="text-red-300">{log.message}</span>
+      </div>
+    )
+  }
+  if (log.type === 'warn') {
+    return (
+      <div className="font-mono text-xs leading-5 hover:bg-white/5 px-2 py-0.5 rounded">
+        <span className="text-gray-600 select-none">[{ts}] </span>
+        <span className="text-yellow-400 font-bold">WARN{'         '}</span>
+        <span className="text-yellow-200">{log.message}</span>
+      </div>
+    )
+  }
+  return (
+    <div className="font-mono text-xs leading-5 hover:bg-white/5 px-2 py-0.5 rounded">
+      <span className="text-gray-600 select-none">[{ts}] </span>
+      <span className="text-gray-400 font-bold">INFO{'         '}</span>
+      <span className="text-gray-400">{log.message}</span>
+    </div>
+  )
+}
+
+function ActivityLine({ log }: { log: ActivityLog }) {
   const color = ACTION_COLOR[log.action_type] ?? 'text-gray-300'
   const ts = new Date(log.created_at).toLocaleTimeString('ko-KR', { hour12: false })
   const email = (log.metadata as any)?._email as string | null
   return (
     <div className="font-mono text-xs leading-5 hover:bg-white/5 px-2 py-0.5 rounded">
-      <span className="text-gray-500 select-none">[{ts}] </span>
-      <span className={`${color} font-bold`}>{log.action_type.toUpperCase().padEnd(13, ' ')}</span>
-      {log.resource_type && <span className="text-gray-400">[{log.resource_type}] </span>}
+      <span className="text-gray-600 select-none">[{ts}] </span>
+      <span className="text-gray-500 text-[10px] mr-1">APP </span>
+      <span className={`${color} font-bold`}>{log.action_type.toUpperCase().slice(0, 8).padEnd(9)}</span>
+      {log.resource_type && <span className="text-gray-500">[{log.resource_type}] </span>}
       <span className="text-gray-200">{log.description}</span>
       {email && <span className="text-cyan-700 ml-2">@{email.split('@')[0]}</span>}
-      {log.user_agent && (
-        <span className="text-gray-600 ml-2 text-[10px]">• {parseUA(log.user_agent)}</span>
-      )}
     </div>
   )
+}
+
+function TerminalLine({ entry }: { entry: TermEntry }) {
+  if (entry.kind === 'server') return <ServerLine log={entry.log} />
+  return <ActivityLine log={entry.log} />
 }
 
 // ─── 메인 컴포넌트 ───────────────────────────────────────
@@ -107,11 +177,13 @@ export default function LogsPage() {
   const [logs, setLogs] = useState<ActivityLog[]>([])
   const [stockLogs, setStockLogs] = useState<StockLogRow[]>([])
   const [errorLogs, setErrorLogs] = useState<ActivityLog[]>([])
-  const [termLogs, setTermLogs] = useState<ActivityLog[]>([])
+  const [termEntries, setTermEntries] = useState<TermEntry[]>([])
   const [loading, setLoading] = useState(false)
   const [isLive, setIsLive] = useState(false)
+  const [termFilter, setTermFilter] = useState<'all' | 'server' | 'activity'>('all')
   const terminalRef = useRef<HTMLDivElement>(null)
   const unsubRef = useRef<(() => void) | null>(null)
+  const sseRef = useRef<EventSource | null>(null)
 
   // ── 로그 로드 ──────────────────────────────────────────
   const loadLogs = useCallback(async () => {
@@ -149,18 +221,49 @@ export default function LogsPage() {
 
   useEffect(() => { if (tab !== 'terminal') loadLogs() }, [loadLogs, tab])
 
-  // 터미널 초기 로드
+  // 터미널 초기 로드 (활동 로그 최근 100건)
   useEffect(() => {
     if (tab !== 'terminal') return
-    getActivityLogs({ limit: 100 }).then(d => setTermLogs([...d].reverse()))
+    getActivityLogs({ limit: 100 }).then(d => {
+      const entries: TermEntry[] = [...d].reverse().map(log => ({ kind: 'activity', log }))
+      setTermEntries(prev => {
+        // 서버 로그가 이미 있으면 병합 후 시간순 정렬
+        const merged = [...prev.filter(e => e.kind === 'server'), ...entries]
+        return merged.sort((a, b) => {
+          const ta = a.kind === 'server' ? a.log.ts : new Date(a.log.created_at).getTime()
+          const tb = b.kind === 'server' ? b.log.ts : new Date(b.log.created_at).getTime()
+          return ta - tb
+        })
+      })
+    })
   }, [tab])
 
-  // 실시간 구독
+  // LIVE 전환 시 SSE + Supabase Realtime 동시 구독
   useEffect(() => {
-    if (!isLive) { unsubRef.current?.(); unsubRef.current = null; return }
-    const unsub = subscribeToLogs(log => setTermLogs(prev => [...prev, log]))
+    if (!isLive) {
+      unsubRef.current?.(); unsubRef.current = null
+      sseRef.current?.close(); sseRef.current = null
+      return
+    }
+
+    // 1) Supabase Realtime (활동 로그)
+    const unsub = subscribeToLogs(log => {
+      setTermEntries(prev => [...prev, { kind: 'activity', log }])
+    })
     unsubRef.current = unsub
-    return () => unsub()
+
+    // 2) SSE (서버 HTTP 로그)
+    const es = new EventSource('/api/server-logs/stream')
+    es.onmessage = (e) => {
+      try {
+        const log: ServerLogEntry = JSON.parse(e.data)
+        setTermEntries(prev => [...prev, { kind: 'server', log }])
+      } catch { /* ignore */ }
+    }
+    es.onerror = () => { es.close(); sseRef.current = null }
+    sseRef.current = es
+
+    return () => { unsub(); es.close() }
   }, [isLive])
 
   // 터미널 자동 스크롤
@@ -168,9 +271,12 @@ export default function LogsPage() {
     if (tab === 'terminal' && terminalRef.current) {
       terminalRef.current.scrollTop = terminalRef.current.scrollHeight
     }
-  }, [termLogs, tab])
+  }, [termEntries, tab])
 
-  useEffect(() => () => { unsubRef.current?.() }, [])
+  useEffect(() => () => {
+    unsubRef.current?.()
+    sseRef.current?.close()
+  }, [])
 
   // ── 탭별 요약 수치 ────────────────────────────────────
   const tabs = [
@@ -426,14 +532,26 @@ export default function LogsPage() {
       {/* ── 실시간 터미널 ── */}
       {tab === 'terminal' && (
         <div className="rounded-xl overflow-hidden border border-gray-800">
+          {/* 타이틀바 */}
           <div className="bg-gray-900 px-4 py-2.5 flex items-center justify-between border-b border-gray-800">
             <div className="flex items-center gap-2">
               <div className="w-3 h-3 rounded-full bg-red-500" />
               <div className="w-3 h-3 rounded-full bg-yellow-500" />
               <div className="w-3 h-3 rounded-full bg-green-500" />
-              <span className="ml-3 text-xs text-gray-400 font-mono">wholesale — activity_logs stream</span>
+              <span className="ml-3 text-xs text-gray-400 font-mono">
+                wholesale — server + app stream
+              </span>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              {/* 필터 토글 */}
+              <div className="flex rounded overflow-hidden border border-gray-700 text-[10px] font-mono">
+                {(['all', 'server', 'activity'] as const).map(f => (
+                  <button key={f} onClick={() => setTermFilter(f)}
+                    className={`px-2 py-1 transition-colors ${termFilter === f ? 'bg-gray-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}>
+                    {f === 'all' ? 'ALL' : f === 'server' ? 'HTTP' : 'APP'}
+                  </button>
+                ))}
+              </div>
               <span className={`text-xs font-mono ${isLive ? 'text-green-400' : 'text-gray-500'}`}>
                 {isLive ? '● LIVE' : '○ PAUSED'}
               </span>
@@ -443,20 +561,28 @@ export default function LogsPage() {
                 }`}>
                 {isLive ? 'STOP' : 'START'}
               </button>
-              <button onClick={() => setTermLogs([])}
+              <button onClick={() => setTermEntries([])}
                 className="px-3 py-1 text-xs rounded font-mono bg-gray-800 text-gray-400 hover:bg-gray-700">
                 CLEAR
               </button>
             </div>
           </div>
+
+          {/* 로그 본문 */}
           <div ref={terminalRef}
-            className="bg-gray-950 text-gray-300 p-3 h-[calc(100vh-280px)] overflow-y-auto">
-            {termLogs.length === 0 ? (
+            className="bg-gray-950 text-gray-300 p-3 h-[calc(100vh-300px)] overflow-y-auto">
+            {termEntries.length === 0 ? (
               <div className="font-mono text-xs text-gray-600 p-2">
-                <span className="text-green-500">$</span> Waiting for events...<span className="animate-pulse">_</span>
+                <span className="text-green-500">$</span>{' '}
+                START 버튼을 누르면 HTTP 요청과 앱 이벤트가 실시간으로 표시됩니다
+                <span className="animate-pulse">_</span>
               </div>
             ) : (
-              termLogs.map((log, i) => <TerminalLine key={log.id ?? i} log={log} />)
+              termEntries
+                .filter(e => termFilter === 'all' || e.kind === (termFilter === 'server' ? 'server' : 'activity'))
+                .map((entry, i) => (
+                  <TerminalLine key={entry.kind === 'server' ? entry.log.id : (entry.log as ActivityLog).id ?? i} entry={entry} />
+                ))
             )}
             {isLive && (
               <div className="font-mono text-xs text-gray-600 mt-1 px-2">
@@ -464,12 +590,28 @@ export default function LogsPage() {
               </div>
             )}
           </div>
+
+          {/* 상태바 */}
           <div className="bg-gray-900 border-t border-gray-800 px-4 py-1.5 flex items-center justify-between">
-            <span className="text-xs font-mono text-gray-500">
-              {termLogs.length} events
-              {isLive && <span className="text-green-400 ml-2">• realtime connected</span>}
+            <span className="text-xs font-mono text-gray-500 flex items-center gap-3">
+              <span>{termEntries.filter(e => e.kind === 'server').length} HTTP</span>
+              <span className="text-gray-700">|</span>
+              <span>{termEntries.filter(e => e.kind === 'activity').length} APP</span>
+              {isLive && (
+                <>
+                  <span className="text-gray-700">|</span>
+                  <span className="text-green-400">● SSE connected</span>
+                  <span className="text-cyan-600">● Realtime connected</span>
+                </>
+              )}
             </span>
-            <span className="text-xs font-mono text-gray-600">UTF-8</span>
+            <div className="flex items-center gap-3 text-[10px] font-mono text-gray-700">
+              <span className="text-blue-600">GET</span>
+              <span className="text-green-600">POST</span>
+              <span className="text-yellow-600">PUT/PATCH</span>
+              <span className="text-red-600">DELETE</span>
+              <span className="text-gray-600">UTF-8</span>
+            </div>
           </div>
         </div>
       )}
