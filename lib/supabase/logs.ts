@@ -95,6 +95,78 @@ export async function getAuthLogs(): Promise<ActivityLog[]> {
   return getActivityLogs({ actionType: 'auth.login', limit: 200 })
 }
 
+export async function getErrorLogs(limit = 200): Promise<ActivityLog[]> {
+  return getActivityLogs({ actionType: 'error', limit })
+}
+
+// ─── 재고 수불 로그 ────────────────────────────────────────
+export interface StockLogRow {
+  id: string
+  product_id: string
+  product_name: string | null
+  business_id: string
+  warehouse_id: string
+  warehouse_name: string | null
+  log_type: string
+  quantity: number
+  unit_price: number | null
+  note: string | null
+  created_at: string
+}
+
+export async function getStockLogs(opts: {
+  productId?: string
+  warehouseId?: string
+  logType?: string
+  from?: string
+  to?: string
+  limit?: number
+} = {}): Promise<StockLogRow[]> {
+  const supabase = createClient()
+  let q = supabase
+    .from('stock_logs')
+    .select('*, products(name), warehouses(name)')
+    .order('created_at', { ascending: false })
+    .limit(opts.limit ?? 300)
+
+  if (opts.productId) q = q.eq('product_id', opts.productId)
+  if (opts.warehouseId) q = q.eq('warehouse_id', opts.warehouseId)
+  if (opts.logType && opts.logType !== 'all') q = q.eq('log_type', opts.logType)
+  if (opts.from) q = q.gte('created_at', opts.from + 'T00:00:00')
+  if (opts.to) q = q.lte('created_at', opts.to + 'T23:59:59')
+
+  const { data, error } = await q
+  if (error) throw new Error(error.message)
+  return (data ?? []).map((r: any) => ({
+    ...r,
+    product_name: r.products?.name ?? null,
+    warehouse_name: r.warehouses?.name ?? null,
+  }))
+}
+
+/** 변경 전/후 diff를 metadata에 포함하여 update 로그 기록 */
+export async function logUpdate<T extends Record<string, unknown>>(opts: {
+  resource_type: ResourceType
+  resource_id: string
+  description: string
+  before: T
+  after: T
+}) {
+  const changed: Record<string, { before: unknown; after: unknown }> = {}
+  for (const key of Object.keys(opts.after)) {
+    if (opts.before[key] !== opts.after[key]) {
+      changed[key] = { before: opts.before[key], after: opts.after[key] }
+    }
+  }
+  return logActivity({
+    action_type: 'update',
+    resource_type: opts.resource_type,
+    resource_id: opts.resource_id,
+    description: opts.description,
+    metadata: { diff: changed },
+  })
+}
+
 export function subscribeToLogs(onInsert: (log: ActivityLog) => void) {
   const supabase = createClient()
   const channel = supabase

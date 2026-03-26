@@ -1,5 +1,6 @@
 import { createClient } from './client'
 import { Product } from '@/lib/types'
+import { logActivity } from './logs'
 
 export async function getProducts(businessId?: string): Promise<Product[]> {
   const supabase = createClient()
@@ -12,12 +13,20 @@ export async function getProducts(businessId?: string): Promise<Product[]> {
 
 export async function upsertProduct(product: Partial<Product> & { name: string }): Promise<Product> {
   const supabase = createClient()
+  const isNew = !product.id
   const { data, error } = await supabase
     .from('products')
     .upsert(product)
     .select()
     .single()
   if (error) throw new Error('상품 저장 실패: ' + error.message)
+  logActivity({
+    action_type: isNew ? 'create' : 'update',
+    resource_type: 'product',
+    resource_id: data.id,
+    description: `상품 ${isNew ? '등록' : '수정'}: ${product.name}`,
+    metadata: { name: product.name, barcode: product.barcode, sell_price: product.sell_price },
+  })
   return data
 }
 
@@ -25,4 +34,5 @@ export async function deleteProduct(id: string): Promise<void> {
   const supabase = createClient()
   const { error } = await supabase.from('products').delete().eq('id', id)
   if (error) throw new Error('상품 삭제 실패: ' + error.message)
+  logActivity({ action_type: 'delete', resource_type: 'product', resource_id: id, description: `상품 삭제: ${id.slice(0, 8)}` })
 }

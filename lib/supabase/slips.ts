@@ -1,5 +1,6 @@
 import { createClient } from './client'
 import { Slip, SlipItem, SlipType } from '@/lib/types'
+import { logActivity } from './logs'
 
 export interface SlipWithItems extends Slip {
   items: SlipItem[]
@@ -66,6 +67,14 @@ export async function createSlip(
     if (itemErr) throw new Error('품목 저장 실패: ' + itemErr.message)
   }
 
+  logActivity({
+    action_type: 'create',
+    resource_type: 'slip',
+    resource_id: slipData.id,
+    description: `${slip.slip_type === 'sale' ? '매출' : '매입'} 거래 입력: 총 ${slip.total_amount.toLocaleString()}원 (${items.length}품목)`,
+    metadata: { slip_type: slip.slip_type, total_amount: slip.total_amount, item_count: items.length },
+  })
+
   return { ...slipData, items }
 }
 
@@ -73,6 +82,7 @@ export async function deleteSlip(id: string): Promise<void> {
   const supabase = createClient()
   const { error } = await supabase.from('slips').delete().eq('id', id)
   if (error) throw new Error('전표 삭제 실패: ' + error.message)
+  logActivity({ action_type: 'delete', resource_type: 'slip', resource_id: id, description: `거래 전표 삭제: ${id.slice(0, 8)}` })
 }
 
 export async function getSlipDetail(id: string): Promise<SlipWithItems> {

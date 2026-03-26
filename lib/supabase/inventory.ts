@@ -1,4 +1,5 @@
 import { createClient } from './client'
+import { logActivity } from './logs'
 
 export interface InventoryRow {
   product_id: string
@@ -67,4 +68,11 @@ export async function adjustInventory(payload: {
     p_note: payload.note ?? null,
   })
   if (error) throw new Error('재고 조정 실패: ' + error.message)
+  logActivity({
+    action_type: 'adjust',
+    resource_type: 'inventory',
+    resource_id: payload.product_id,
+    description: `재고 조정: ${payload.quantity > 0 ? '+' : ''}${payload.quantity}개${payload.note ? ` (${payload.note})` : ''}`,
+    metadata: { product_id: payload.product_id, warehouse_id: payload.warehouse_id, quantity: payload.quantity },
+  })
 }
