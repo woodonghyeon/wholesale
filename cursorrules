@@ -1,0 +1,806 @@
+# 문구 도매 통합 관리 시스템 — Cursor 프로젝트 규칙
+
+## 프로젝트 개요
+네이버 스마트스토어 문구 도매 사업자 3개를 통합·개별 관리하는 웹 기반 ERP 시스템.
+경영박사 Cloud 수준의 기능을 웹 기반으로 구현하되, 불필요한 depth 없이 직관적인 UX로 만든다.
+설치 없이 브라우저에서 바로 사용하고, 모바일에서도 핵심 기능을 사용할 수 있도록 한다.
+
+---
+
+## 기술 스택 (절대 변경 금지)
+
+- **Frontend**: Next.js 14 (App Router), TypeScript, Tailwind CSS
+- **Backend**: Next.js API Routes (서버리스)
+- **Database**: Supabase (PostgreSQL)
+- **Auth**: Supabase Auth
+- **Charts**: Recharts
+- **Forms**: React Hook Form + Zod
+- **State**: Zustand
+- **Toast**: Sonner
+- **날짜**: date-fns
+- **Excel**: xlsx
+- **배포**: Vercel
+
+---
+
+## 디렉토리 구조
+
+```
+/app
+  /api                  ← API Routes (도메인별 폴더)
+  /(auth)               ← 로그인·회원가입
+  /(dashboard)          ← 메인 레이아웃
+    /dashboard          ← 대시보드 (홈)
+    /transactions       ← 거래 입력 (거래명세표·매입)
+    /sales              ← 매출 현황·원장·미수금
+    /purchase           ← 구매 현황·원장·미지급금
+    /inventory          ← 재고 관리
+    /stocktake          ← 재고 실사
+    /products           ← 상품 관리
+    /partners           ← 거래처 관리
+    /staff              ← 영업사원 관리
+    /quotes             ← 견적서·발주서
+    /returns            ← 반품·불량
+    /bundles            ← 번들 상품
+    /customers          ← 정기 구매 고객
+    /cash               ← 현금 출납
+    /tax                ← 세금계산서
+    /reports            ← 보고서·출력
+    /alerts             ← 알림 센터
+    /settings           ← 설정
+/components
+  /ui                   ← 공통 UI (버튼, 모달, 테이블 등)
+  /forms                ← 폼 컴포넌트
+  /charts               ← 차트
+  /print                ← 출력용 컴포넌트
+  /[domain]             ← 도메인별 컴포넌트
+/lib
+  /supabase             ← DB 클라이언트·쿼리 함수 (도메인별)
+  /utils                ← 계산 유틸
+  /validations          ← Zod 스키마
+  /types                ← TypeScript 타입
+/hooks                  ← 커스텀 훅
+/store                  ← Zustand 스토어
+/data                   ← 정적 데이터 (카테고리 등)
+```
+
+---
+
+## 데이터베이스 스키마
+
+> 모든 테이블은 아래 순서대로 생성한다.
+> 컬럼 추가·삭제는 반드시 먼저 확인 후 진행한다.
+
+```sql
+-- ══════════════════════════════════════
+-- 1. 기준 정보 테이블
+-- ══════════════════════════════════════
+
+-- 사업자
+create table businesses (
+  id            uuid primary key default gen_random_uuid(),
+  name          text not null,
+  business_no   text,                        -- 사업자등록번호
+  owner_name    text,                        -- 대표자명
+  address       text,
+  phone         text,
+  email         text,
+  sort_order    int default 0,
+  created_at    timestamptz default now()
+);
+
+-- 채널 (판매 채널별 수수료)
+create table channels (
+  id                 uuid primary key default gen_random_uuid(),
+  name               text not null,
+  commission_rate    numeric(5,2) default 0,  -- 플랫폼 수수료 %
+  payment_fee_rate   numeric(5,2) default 0,  -- 결제 수수료 %
+  shipping_fee       numeric(10,0) default 0, -- 기본 배송비
+  sort_order         int default 0
+);
+
+-- 창고
+create table warehouses (
+  id           uuid primary key default gen_random_uuid(),
+  business_id  uuid references businesses(id),
+  name         text not null,               -- 본사/외부매장/차량/창고 등
+  address      text,
+  note         text,
+  created_at   timestamptz default now()
+);
+
+-- 거래처
+create table partners (
+  id           uuid primary key default gen_random_uuid(),
+  name         text not null,
+  partner_type text check (partner_type in ('supplier','customer','both')) default 'both',
+  contact      text,
+  email        text,
+  phone        text,
+  address      text,
+  business_no  text,                        -- 사업자등록번호
+  credit_limit numeric(15,0) default 0,     -- 외상한도
+  note         text,
+  created_at   timestamptz default now()
+);
+
+-- 영업사원
+create table staff (
+  id           uuid primary key default gen_random_uuid(),
+  business_id  uuid references businesses(id),
+  name         text not null,
+  phone        text,
+  email        text,
+  price_grade  int default 0,               -- 단가 등급 (0=기본)
+  note         text,
+  is_active    boolean default true,
+  created_at   timestamptz default now()
+);
+
+-- ══════════════════════════════════════
+-- 2. 상품 테이블
+-- ══════════════════════════════════════
+
+-- 상품 마스터
+-- [중요] barcode는 사업자(business_id) 내에서만 유일
+create table products (
+  id           uuid primary key default gen_random_uuid(),
+  business_id  uuid references businesses(id),
+  barcode      text,
+  name         text not null,
+  category     text,
+  unit         text default '개',
+  buy_price    numeric(10,0) default 0,     -- 기본 매입단가
+  sell_price   numeric(10,0) default 0,     -- 기본 판매단가
+  min_stock    int default 10,
+  is_bundle    boolean default false,
+  note         text,
+  created_at   timestamptz default now(),
+  unique(business_id, barcode)
+);
+
+-- 거래처별·등급별 특수 단가
+-- price_type: 'partner'=거래처별, 'grade'=등급별, 'quantity'=수량별
+create table product_prices (
+  id           uuid primary key default gen_random_uuid(),
+  product_id   uuid references products(id) on delete cascade,
+  price_type   text check (price_type in ('partner','grade','quantity')),
+  partner_id   uuid references partners(id),  -- price_type='partner'일 때
+  grade        int,                            -- price_type='grade'일 때 (0~9)
+  min_quantity int default 1,                  -- price_type='quantity'일 때 최소수량
+  price        numeric(10,0) not null,
+  effective_from date default current_date,
+  note         text
+);
+
+-- 번들 구성품
+create table bundle_items (
+  id                   uuid primary key default gen_random_uuid(),
+  bundle_product_id    uuid references products(id) on delete cascade,
+  component_product_id uuid references products(id),
+  quantity             int not null
+);
+
+-- ══════════════════════════════════════
+-- 3. 재고 테이블
+-- ══════════════════════════════════════
+
+-- 재고 (사업자 + 창고별 분리)
+create table inventory (
+  id            uuid primary key default gen_random_uuid(),
+  product_id    uuid references products(id),
+  business_id   uuid references businesses(id),
+  warehouse_id  uuid references warehouses(id),
+  quantity      int default 0,
+  updated_at    timestamptz default now(),
+  unique(product_id, business_id, warehouse_id)
+);
+
+-- 입출고 이력 (모든 재고 변동의 원장)
+create table stock_logs (
+  id            uuid primary key default gen_random_uuid(),
+  product_id    uuid references products(id),
+  business_id   uuid references businesses(id),
+  warehouse_id  uuid references warehouses(id),
+  log_type      text check (log_type in (
+                  'in',           -- 입고
+                  'out',          -- 출고
+                  'return_in',    -- 반품 재입고
+                  'return_out',   -- 반품 반출 (공급사 반품)
+                  'transfer_in',  -- 창고 이동 입고
+                  'transfer_out', -- 창고 이동 출고
+                  'adjustment',   -- 실사 조정
+                  'bundle_out'    -- 번들 출고 (구성품)
+                )),
+  quantity      int not null,
+  unit_price    numeric(10,0),
+  ref_type      text,             -- 참조 문서 유형 (slip, purchase_order 등)
+  ref_id        uuid,             -- 참조 문서 ID
+  partner_id    uuid references partners(id),
+  channel_id    uuid references channels(id),
+  staff_id      uuid references staff(id),
+  note          text,
+  created_at    timestamptz default now()
+);
+
+-- 재고 실사
+create table stocktake_sessions (
+  id           uuid primary key default gen_random_uuid(),
+  business_id  uuid references businesses(id),
+  warehouse_id uuid references warehouses(id),
+  name         text not null,
+  status       text check (status in ('open','reviewing','done')) default 'open',
+  started_at   timestamptz default now(),
+  closed_at    timestamptz
+);
+
+create table stocktake_items (
+  id              uuid primary key default gen_random_uuid(),
+  session_id      uuid references stocktake_sessions(id) on delete cascade,
+  product_id      uuid references products(id),
+  system_quantity int not null,
+  actual_quantity int,
+  difference      int generated always as (coalesce(actual_quantity,0) - system_quantity) stored,
+  counted_at      timestamptz,
+  unique(session_id, product_id)
+);
+
+-- ══════════════════════════════════════
+-- 4. 거래 테이블 (거래명세표·매입)
+-- ══════════════════════════════════════
+
+-- 거래명세표 헤더 (매출·매입 통합)
+-- slip_type: 'sale'=매출, 'purchase'=매입
+create table slips (
+  id              uuid primary key default gen_random_uuid(),
+  slip_no         text,                     -- 전표번호 (자동 생성)
+  slip_type       text check (slip_type in ('sale','purchase')),
+  business_id     uuid references businesses(id),
+  partner_id      uuid references partners(id),
+  staff_id        uuid references staff(id),
+  channel_id      uuid references channels(id),
+  warehouse_id    uuid references warehouses(id),
+  slip_date       date not null default current_date,
+  due_date        date,                     -- 결제 예정일
+  payment_type    text check (payment_type in ('cash','credit','mixed')) default 'credit',
+  cash_amount     numeric(15,0) default 0,  -- 현금 수령액
+  supply_amount   numeric(15,0) default 0,  -- 공급가액 (합계)
+  tax_amount      numeric(15,0) default 0,  -- 세액
+  total_amount    numeric(15,0) default 0,  -- 합계금액
+  memo            text,
+  is_tax_invoice  boolean default false,    -- 세금계산서 발행 여부
+  tax_invoice_no  text,                     -- 세금계산서 번호
+  created_at      timestamptz default now()
+);
+
+-- 거래명세표 품목 라인
+create table slip_items (
+  id          uuid primary key default gen_random_uuid(),
+  slip_id     uuid references slips(id) on delete cascade,
+  product_id  uuid references products(id),
+  product_name text,                        -- 입력 시점 상품명 스냅샷
+  quantity    int not null,
+  unit_price  numeric(10,0) not null,
+  supply_amount numeric(15,0),              -- 수량 × 단가
+  tax_amount  numeric(15,0) default 0,
+  note        text,
+  sort_order  int default 0
+);
+
+-- ══════════════════════════════════════
+-- 5. 외상 관리 테이블
+-- ══════════════════════════════════════
+
+-- 수금·지급 이력 (외상 결제)
+create table payments (
+  id             uuid primary key default gen_random_uuid(),
+  business_id    uuid references businesses(id),
+  partner_id     uuid references partners(id),
+  payment_type   text check (payment_type in ('receive','pay')),
+                                            -- receive: 수금, pay: 지급
+  payment_method text check (payment_method in ('cash','transfer','card','note')),
+                                            -- note: 어음
+  amount         numeric(15,0) not null,
+  payment_date   date not null default current_date,
+  ref_slip_id    uuid references slips(id), -- 연결 전표 (선택)
+  note           text,
+  created_at     timestamptz default now()
+);
+
+-- ══════════════════════════════════════
+-- 6. 어음·수표 관리
+-- ══════════════════════════════════════
+
+create table notes (
+  id             uuid primary key default gen_random_uuid(),
+  business_id    uuid references businesses(id),
+  note_type      text check (note_type in ('receivable','payable')),
+                                            -- receivable: 받을어음, payable: 지급어음
+  partner_id     uuid references partners(id),
+  amount         numeric(15,0) not null,
+  issue_date     date not null,             -- 발행일
+  due_date       date not null,             -- 만기일
+  bank_name      text,
+  note_no        text,                      -- 어음번호
+  status         text check (status in ('pending','cleared','bounced')) default 'pending',
+  note           text,
+  created_at     timestamptz default now()
+);
+
+-- ══════════════════════════════════════
+-- 7. 현금 출납
+-- ══════════════════════════════════════
+
+create table cash_book (
+  id             uuid primary key default gen_random_uuid(),
+  business_id    uuid references businesses(id),
+  cash_type      text check (cash_type in ('in','out')),
+  amount         numeric(15,0) not null,
+  category       text,                      -- 수입/지출 분류
+  description    text,
+  cash_date      date not null default current_date,
+  ref_slip_id    uuid references slips(id),
+  created_at     timestamptz default now()
+);
+
+-- ══════════════════════════════════════
+-- 8. 입고 예정·견적서
+-- ══════════════════════════════════════
+
+-- 견적서
+create table quotes (
+  id             uuid primary key default gen_random_uuid(),
+  quote_no       text,
+  business_id    uuid references businesses(id),
+  partner_id     uuid references partners(id),
+  staff_id       uuid references staff(id),
+  quote_date     date not null default current_date,
+  valid_until    date,
+  status         text check (status in ('draft','sent','accepted','rejected','expired')) default 'draft',
+  total_amount   numeric(15,0) default 0,
+  note           text,
+  created_at     timestamptz default now()
+);
+
+create table quote_items (
+  id          uuid primary key default gen_random_uuid(),
+  quote_id    uuid references quotes(id) on delete cascade,
+  product_id  uuid references products(id),
+  product_name text,
+  quantity    int not null,
+  unit_price  numeric(10,0) not null,
+  amount      numeric(15,0),
+  note        text,
+  sort_order  int default 0
+);
+
+-- 입고 예정
+create table purchase_orders (
+  id             uuid primary key default gen_random_uuid(),
+  order_no       text,
+  business_id    uuid references businesses(id),
+  partner_id     uuid references partners(id),
+  warehouse_id   uuid references warehouses(id),
+  expected_date  date not null,
+  status         text check (status in ('pending','partial','done','cancelled')) default 'pending',
+  note           text,
+  created_at     timestamptz default now()
+);
+
+create table purchase_order_items (
+  id                uuid primary key default gen_random_uuid(),
+  order_id          uuid references purchase_orders(id) on delete cascade,
+  product_id        uuid references products(id),
+  quantity          int not null,
+  received_quantity int default 0,
+  unit_price        numeric(10,0)
+);
+
+-- ══════════════════════════════════════
+-- 9. 반품·불량
+-- ══════════════════════════════════════
+
+create table returns (
+  id           uuid primary key default gen_random_uuid(),
+  business_id  uuid references businesses(id),
+  partner_id   uuid references partners(id),
+  product_id   uuid references products(id),
+  quantity     int not null,
+  reason       text check (reason in ('simple','defect','wrong_delivery','other')),
+  disposition  text check (disposition in ('restock','dispose','return_to_supplier')),
+  status       text check (status in ('received','inspecting','done')) default 'received',
+  restock_done boolean default false,
+  ref_slip_id  uuid references slips(id),
+  note         text,
+  created_at   timestamptz default now()
+);
+
+-- ══════════════════════════════════════
+-- 10. 정기 구매 고객
+-- ══════════════════════════════════════
+
+create table regular_customers (
+  id                uuid primary key default gen_random_uuid(),
+  business_id       uuid references businesses(id),
+  partner_id        uuid references partners(id),   -- partners 테이블과 연결
+  order_cycle_days  int default 30,
+  last_order_date   date,
+  channel_id        uuid references channels(id),
+  note              text,
+  created_at        timestamptz default now()
+);
+
+create table regular_customer_items (
+  id             uuid primary key default gen_random_uuid(),
+  customer_id    uuid references regular_customers(id) on delete cascade,
+  product_id     uuid references products(id),
+  usual_quantity int not null,
+  usual_price    numeric(10,0)
+);
+
+-- ══════════════════════════════════════
+-- 11. 세금계산서
+-- ══════════════════════════════════════
+
+create table tax_invoices (
+  id              uuid primary key default gen_random_uuid(),
+  business_id     uuid references businesses(id),
+  partner_id      uuid references partners(id),
+  ref_slip_id     uuid references slips(id),
+  invoice_type    text check (invoice_type in ('issue','receive','amendment')),
+  invoice_no      text,                     -- 국세청 승인번호
+  supply_amount   numeric(15,0) not null,
+  tax_amount      numeric(15,0) not null,
+  total_amount    numeric(15,0) not null,
+  issue_date      date not null,
+  status          text check (status in ('draft','issued','cancelled')) default 'draft',
+  hometax_synced  boolean default false,
+  note            text,
+  created_at      timestamptz default now()
+);
+
+-- ══════════════════════════════════════
+-- 12. 쇼핑몰 주문 연동
+-- ══════════════════════════════════════
+
+create table channel_orders (
+  id                uuid primary key default gen_random_uuid(),
+  business_id       uuid references businesses(id),
+  channel           text not null,          -- 'smartstore','coupang','11st' 등
+  external_order_id text not null,
+  order_status      text,
+  ordered_at        timestamptz,
+  synced_at         timestamptz default now(),
+  raw_data          jsonb,
+  is_processed      boolean default false,
+  ref_slip_id       uuid references slips(id),
+  unique(channel, external_order_id)
+);
+
+create table channel_order_items (
+  id                   uuid primary key default gen_random_uuid(),
+  order_id             uuid references channel_orders(id) on delete cascade,
+  product_id           uuid references products(id),
+  external_product_id  text,
+  product_name         text,
+  quantity             int,
+  unit_price           numeric(10,0),
+  is_matched           boolean default false
+);
+
+-- ══════════════════════════════════════
+-- 13. 매출 목표
+-- ══════════════════════════════════════
+
+create table sales_targets (
+  id              uuid primary key default gen_random_uuid(),
+  business_id     uuid references businesses(id),
+  year_month      text not null,            -- 'YYYY-MM'
+  target_revenue  numeric(15,0) not null,
+  target_profit   numeric(15,0),
+  created_at      timestamptz default now(),
+  unique(business_id, year_month)
+);
+
+-- ══════════════════════════════════════
+-- 14. 기본 거래처 설정 (자동 발주용)
+-- ══════════════════════════════════════
+
+create table product_default_partners (
+  id         uuid primary key default gen_random_uuid(),
+  product_id uuid references products(id),
+  partner_id uuid references partners(id),
+  unique(product_id)
+);
+```
+
+---
+
+## RPC 함수 (Supabase SQL 에디터에서 실행)
+
+```sql
+-- 입고 처리
+create or replace function process_stock_in(
+  p_product_id   uuid,
+  p_business_id  uuid,
+  p_warehouse_id uuid,
+  p_quantity     int,
+  p_unit_price   numeric,
+  p_partner_id   uuid default null,
+  p_ref_type     text default null,
+  p_ref_id       uuid default null,
+  p_note         text default null
+) returns void language plpgsql as $$
+begin
+  insert into stock_logs(product_id, business_id, warehouse_id, log_type, quantity,
+    unit_price, partner_id, ref_type, ref_id, note)
+  values (p_product_id, p_business_id, p_warehouse_id, 'in', p_quantity,
+    p_unit_price, p_partner_id, p_ref_type, p_ref_id, p_note);
+
+  insert into inventory(product_id, business_id, warehouse_id, quantity)
+  values (p_product_id, p_business_id, p_warehouse_id, p_quantity)
+  on conflict (product_id, business_id, warehouse_id)
+  do update set quantity = inventory.quantity + p_quantity, updated_at = now();
+end;
+$$;
+
+-- 출고 처리
+create or replace function process_stock_out(
+  p_product_id   uuid,
+  p_business_id  uuid,
+  p_warehouse_id uuid,
+  p_quantity     int,
+  p_unit_price   numeric,
+  p_partner_id   uuid default null,
+  p_channel_id   uuid default null,
+  p_staff_id     uuid default null,
+  p_ref_type     text default null,
+  p_ref_id       uuid default null,
+  p_log_type     text default 'out',
+  p_note         text default null
+) returns void language plpgsql as $$
+declare v_stock int;
+begin
+  select quantity into v_stock from inventory
+  where product_id=p_product_id and business_id=p_business_id and warehouse_id=p_warehouse_id;
+
+  if coalesce(v_stock,0) < p_quantity then
+    raise exception '재고 부족: 현재고=%, 요청=%', coalesce(v_stock,0), p_quantity;
+  end if;
+
+  insert into stock_logs(product_id, business_id, warehouse_id, log_type, quantity,
+    unit_price, partner_id, channel_id, staff_id, ref_type, ref_id, note)
+  values (p_product_id, p_business_id, p_warehouse_id, p_log_type, p_quantity,
+    p_unit_price, p_partner_id, p_channel_id, p_staff_id, p_ref_type, p_ref_id, p_note);
+
+  update inventory
+  set quantity = quantity - p_quantity, updated_at = now()
+  where product_id=p_product_id and business_id=p_business_id and warehouse_id=p_warehouse_id;
+end;
+$$;
+
+-- 재고 조정 (실사)
+create or replace function process_stock_adjustment(
+  p_product_id   uuid,
+  p_business_id  uuid,
+  p_warehouse_id uuid,
+  p_new_quantity int,
+  p_note         text default null
+) returns void language plpgsql as $$
+declare v_diff int; v_current int;
+begin
+  select quantity into v_current from inventory
+  where product_id=p_product_id and business_id=p_business_id and warehouse_id=p_warehouse_id;
+  v_diff := p_new_quantity - coalesce(v_current, 0);
+
+  insert into stock_logs(product_id, business_id, warehouse_id, log_type, quantity, note)
+  values (p_product_id, p_business_id, p_warehouse_id, 'adjustment', v_diff, p_note);
+
+  insert into inventory(product_id, business_id, warehouse_id, quantity)
+  values (p_product_id, p_business_id, p_warehouse_id, p_new_quantity)
+  on conflict (product_id, business_id, warehouse_id)
+  do update set quantity = p_new_quantity, updated_at = now();
+end;
+$$;
+
+-- 반품 재입고
+create or replace function process_stock_return_in(
+  p_product_id   uuid,
+  p_business_id  uuid,
+  p_warehouse_id uuid,
+  p_quantity     int,
+  p_return_id    uuid default null
+) returns void language plpgsql as $$
+begin
+  insert into stock_logs(product_id, business_id, warehouse_id, log_type, quantity, ref_type, ref_id)
+  values (p_product_id, p_business_id, p_warehouse_id, 'return_in', p_quantity, 'return', p_return_id);
+
+  insert into inventory(product_id, business_id, warehouse_id, quantity)
+  values (p_product_id, p_business_id, p_warehouse_id, p_quantity)
+  on conflict (product_id, business_id, warehouse_id)
+  do update set quantity = inventory.quantity + p_quantity, updated_at = now();
+end;
+$$;
+
+-- 번들 출고 (원자적 처리)
+create or replace function process_bundle_out(
+  p_bundle_product_id uuid,
+  p_business_id       uuid,
+  p_warehouse_id      uuid,
+  p_bundle_quantity   int,
+  p_sell_price        numeric,
+  p_channel_id        uuid default null,
+  p_ref_id            uuid default null
+) returns void language plpgsql as $$
+declare comp record; v_stock int; v_need int;
+begin
+  for comp in select bi.component_product_id, bi.quantity as unit_qty
+              from bundle_items bi where bi.bundle_product_id = p_bundle_product_id
+  loop
+    v_need := comp.unit_qty * p_bundle_quantity;
+    select quantity into v_stock from inventory
+    where product_id=comp.component_product_id and business_id=p_business_id and warehouse_id=p_warehouse_id;
+    if coalesce(v_stock,0) < v_need then
+      raise exception '구성품 재고 부족: product_id=%, 현재고=%, 필요=%',
+        comp.component_product_id, coalesce(v_stock,0), v_need;
+    end if;
+  end loop;
+
+  for comp in select bi.component_product_id, bi.quantity as unit_qty
+              from bundle_items bi where bi.bundle_product_id = p_bundle_product_id
+  loop
+    v_need := comp.unit_qty * p_bundle_quantity;
+    insert into stock_logs(product_id, business_id, warehouse_id, log_type, quantity, note)
+    values (comp.component_product_id, p_business_id, p_warehouse_id, 'bundle_out', v_need, '번들출고구성품');
+    update inventory set quantity = quantity - v_need, updated_at = now()
+    where product_id=comp.component_product_id and business_id=p_business_id and warehouse_id=p_warehouse_id;
+  end loop;
+
+  insert into stock_logs(product_id, business_id, warehouse_id, log_type, quantity,
+    unit_price, channel_id, ref_type, ref_id)
+  values (p_bundle_product_id, p_business_id, p_warehouse_id, 'out', p_bundle_quantity,
+    p_sell_price, p_channel_id, 'slip', p_ref_id);
+end;
+$$;
+```
+
+---
+
+## RLS 설정
+
+```sql
+do $$
+declare t text;
+  tables text[] := array[
+    'businesses','channels','warehouses','partners','staff',
+    'products','product_prices','bundle_items',
+    'inventory','stock_logs','stocktake_sessions','stocktake_items',
+    'slips','slip_items','payments','notes','cash_book',
+    'quotes','quote_items','purchase_orders','purchase_order_items',
+    'returns','regular_customers','regular_customer_items',
+    'tax_invoices','channel_orders','channel_order_items',
+    'sales_targets','product_default_partners'
+  ];
+begin
+  foreach t in array tables loop
+    execute format('alter table %I enable row level security', t);
+    execute format(
+      'create policy "auth_only" on %I for all to authenticated using (true) with check (true)', t
+    );
+  end loop;
+end $$;
+```
+
+---
+
+## 초기 데이터 (Seed)
+
+```sql
+insert into channels(name, commission_rate, payment_fee_rate, shipping_fee, sort_order) values
+  ('네이버 스마트스토어', 3.50, 3.74, 3000, 1),
+  ('쿠팡',               5.00, 1.80, 2500, 2),
+  ('11번가',             7.00, 1.50, 3000, 3),
+  ('자사몰',             0.00, 2.50,    0, 4),
+  ('직접판매(현금)',     0.00, 0.00,    0, 5);
+```
+
+---
+
+## 코딩 규칙
+
+### 일반
+- 모든 파일 TypeScript (.tsx / .ts)
+- 함수형 컴포넌트만 사용 (클래스 컴포넌트 금지)
+- 변수·함수명 camelCase, 컴포넌트명 PascalCase
+- 한국어 주석 권장
+- `any` 타입 사용 금지 (`// eslint-disable-next-line` 주석 필수)
+- 인라인 스타일 사용 금지 (Tailwind 클래스만 사용)
+- 500줄 초과 파일 컴포넌트 분리
+
+### Supabase 쿼리
+- 모든 DB 쿼리는 `/lib/supabase/` 폴더 도메인별 파일로 분리
+- API Route에서 직접 쿼리 금지 — 반드시 lib 함수 호출
+- 에러 처리: try/catch + 한국어 에러 메시지
+
+### UI/UX
+- 모든 페이지 로딩 스켈레톤 (Suspense 활용)
+- 테이블 페이지네이션 기본 (20행)
+- 모바일 반응형 필수 (Tailwind sm:/md:)
+- 폼 저장 후 sonner 토스트 성공/실패
+- 삭제 시 확인 모달 필수
+
+### 재고 변경 규칙
+- **재고 직접 수정 금지** — 반드시 RPC 함수를 통해 변경
+- 모든 재고 변동은 stock_logs에 이력 기록
+- 번들 출고: process_bundle_out RPC 단일 호출
+
+### 이익 계산 공식 (lib/utils/profit.ts)
+```
+실이익 = 판매가 - 매입단가 - (판매가 × 플랫폼수수료율/100) - (판매가 × 결제수수료율/100) - 배송비
+이익률(%) = (실이익 / 판매가) × 100
+손익분기가 = 매입단가 / (1 - 수수료합계율/100 - 목표이익률/100)
+```
+- 수수료율은 반드시 channels 테이블에서 조회 (하드코딩 금지)
+
+### 단가 결정 우선순위 (lib/utils/price.ts)
+```
+1순위: 거래처별 특수단가 (product_prices.price_type='partner')
+2순위: 등급별 단가 (staff 등급 기반, price_type='grade')
+3순위: 수량별 단가 (price_type='quantity')
+4순위: 상품 기본 판매단가 (products.sell_price)
+```
+
+### 미수금·미지급금 계산
+```
+미수금 = 해당 거래처 매출 slips 합계 - payments(receive) 합계
+미지급금 = 해당 거래처 매입 slips 합계 - payments(pay) 합계
+```
+
+### 전표번호 자동 생성 규칙
+```
+매출: S-YYYYMMDD-NNNN (예: S-20250326-0001)
+매입: P-YYYYMMDD-NNNN
+견적: Q-YYYYMMDD-NNNN
+```
+
+---
+
+## 사업자 필터 (전역 상태)
+- Zustand store: `/store/businessStore.ts`
+- selectedBusinessId: 'all' | string
+- 모든 쿼리 함수: `businessId?: string` 파라미터 수신
+- 헤더 드롭다운에서 전역 전환
+
+---
+
+## 금지 사항
+- barcode 단독 UNIQUE 제약 금지 → 반드시 UNIQUE(business_id, barcode)
+- inventory 직접 UPDATE 금지 → RPC 함수 경유
+- 수수료율 하드코딩 금지 → channels 테이블 조회
+- 금액 계산 시 소수점 표시 금지 → Math.round() 처리 필수
+
+---
+
+## 개발 순서
+1. DB 스키마 전체 생성
+2. RPC 함수 생성
+3. RLS 설정
+4. Seed 데이터 실행
+5. Next.js 프로젝트 초기화
+6. Supabase 클라이언트 + 타입 정의
+7. 로그인·인증·미들웨어
+8. 공통 레이아웃·사이드바·헤더
+9. 기준 정보 (사업자·거래처·상품·창고·채널)
+10. 재고 관리 + 바코드 입출고
+11. 거래명세표 입력 (매출)
+12. 매입 입력
+13. 미수금·미지급금
+14. 매출 대시보드
+15. 보고서·출력
+16. 견적서·발주서
+17. 반품·불량
+18. 번들·정기고객
+19. 현금출납·어음
+20. 세금계산서
+21. 실사·알림센터
+22. 모바일 최적화
