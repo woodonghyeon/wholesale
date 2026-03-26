@@ -1,5 +1,6 @@
 import { createClient } from './client'
 import { Quote, QuoteItem, QuoteStatus, PurchaseOrder, PurchaseOrderItem, PurchaseOrderStatus } from '@/lib/types'
+import { logActivity } from './logs'
 
 export interface QuoteWithItems extends Quote {
   items: QuoteItem[]
@@ -35,6 +36,7 @@ export async function createQuote(
     const { error: ie } = await supabase.from('quote_items').insert(items.map((item, i) => ({ ...item, quote_id: data.id, sort_order: i })))
     if (ie) throw new Error('품목 저장 실패: ' + ie.message)
   }
+  logActivity({ action_type: 'create', resource_type: 'quote', resource_id: data.id, description: `견적서 등록: 총 ${quote.total_amount.toLocaleString()}원 (${items.length}품목)`, metadata: { total_amount: quote.total_amount, item_count: items.length } })
   return data
 }
 
@@ -42,12 +44,14 @@ export async function updateQuoteStatus(id: string, status: QuoteStatus): Promis
   const supabase = createClient()
   const { error } = await supabase.from('quotes').update({ status }).eq('id', id)
   if (error) throw new Error('상태 변경 실패: ' + error.message)
+  logActivity({ action_type: 'update', resource_type: 'quote', resource_id: id, description: `견적서 상태 변경: ${status}` })
 }
 
 export async function deleteQuote(id: string): Promise<void> {
   const supabase = createClient()
   const { error } = await supabase.from('quotes').delete().eq('id', id)
   if (error) throw new Error('삭제 실패: ' + error.message)
+  logActivity({ action_type: 'delete', resource_type: 'quote', resource_id: id, description: `견적서 삭제: ${id.slice(0, 8)}` })
 }
 
 // ── 발주서 ──
@@ -81,6 +85,7 @@ export async function createPurchaseOrder(
     const { error: ie } = await supabase.from('purchase_order_items').insert(items.map(item => ({ ...item, order_id: data.id })))
     if (ie) throw new Error('품목 저장 실패: ' + ie.message)
   }
+  logActivity({ action_type: 'create', resource_type: 'quote', resource_id: data.id, description: `발주서 등록 (${items.length}품목)`, metadata: { item_count: items.length } })
   return data
 }
 
@@ -88,10 +93,12 @@ export async function updateOrderStatus(id: string, status: PurchaseOrderStatus)
   const supabase = createClient()
   const { error } = await supabase.from('purchase_orders').update({ status }).eq('id', id)
   if (error) throw new Error('상태 변경 실패: ' + error.message)
+  logActivity({ action_type: 'update', resource_type: 'quote', resource_id: id, description: `발주서 상태 변경: ${status}` })
 }
 
 export async function deletePurchaseOrder(id: string): Promise<void> {
   const supabase = createClient()
   const { error } = await supabase.from('purchase_orders').delete().eq('id', id)
   if (error) throw new Error('삭제 실패: ' + error.message)
+  logActivity({ action_type: 'delete', resource_type: 'quote', resource_id: id, description: `발주서 삭제: ${id.slice(0, 8)}` })
 }

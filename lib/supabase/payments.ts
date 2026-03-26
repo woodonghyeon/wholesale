@@ -1,5 +1,6 @@
 import { createClient } from './client'
 import { Payment } from '../types'
+import { logActivity } from './logs'
 
 export type PaymentRow = Payment & { partner_name?: string }
 
@@ -78,12 +79,15 @@ export async function getBalanceSummary(businessId?: string): Promise<BalanceSum
 
 export async function upsertPayment(payment: Partial<Payment>) {
   const supabase = createClient()
+  const isNew = !payment.id
   const { error } = await supabase.from('payments').upsert(payment)
   if (error) throw new Error(error.message)
+  logActivity({ action_type: isNew ? 'create' : 'update', resource_type: 'payment', resource_id: payment.id ?? '', description: `${payment.payment_type === 'receive' ? '수금' : '지급'} ${isNew ? '등록' : '수정'}: ${(payment.amount ?? 0).toLocaleString()}원`, metadata: { payment_type: payment.payment_type, amount: payment.amount, payment_method: payment.payment_method } })
 }
 
 export async function deletePayment(id: string) {
   const supabase = createClient()
   const { error } = await supabase.from('payments').delete().eq('id', id)
   if (error) throw new Error(error.message)
+  logActivity({ action_type: 'delete', resource_type: 'payment', resource_id: id, description: `수금/지급 삭제: ${id.slice(0, 8)}` })
 }

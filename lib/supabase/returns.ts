@@ -1,5 +1,6 @@
 import { createClient } from './client'
 import { Return, ReturnReason, ReturnDisposition, ReturnStatus } from '@/lib/types'
+import { logActivity } from './logs'
 
 export interface ReturnRow extends Return {
   partner_name?: string
@@ -24,8 +25,10 @@ export async function getReturns(businessId?: string): Promise<ReturnRow[]> {
 
 export async function upsertReturn(entry: Partial<Return> & { business_id: string }): Promise<Return> {
   const supabase = createClient()
+  const isNew = !entry.id
   const { data, error } = await supabase.from('returns').upsert(entry).select().single()
   if (error) throw new Error('저장 실패: ' + error.message)
+  logActivity({ action_type: isNew ? 'create' : 'update', resource_type: 'return', resource_id: data.id, description: `반품 ${isNew ? '등록' : '수정'}: ${entry.quantity}개 (${entry.reason ?? '사유미입력'})`, metadata: { quantity: entry.quantity, reason: entry.reason, status: entry.status } })
   return data
 }
 
@@ -33,4 +36,5 @@ export async function deleteReturn(id: string): Promise<void> {
   const supabase = createClient()
   const { error } = await supabase.from('returns').delete().eq('id', id)
   if (error) throw new Error('삭제 실패: ' + error.message)
+  logActivity({ action_type: 'delete', resource_type: 'return', resource_id: id, description: `반품 삭제: ${id.slice(0, 8)}` })
 }
