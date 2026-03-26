@@ -82,5 +82,13 @@ CREATE POLICY "authenticated can insert activity_logs"
 CREATE POLICY "authenticated can read activity_logs"
   ON public.activity_logs FOR SELECT TO authenticated USING (true);
 
--- Realtime 활성화 (터미널 탭 실시간 스트림용)
-ALTER PUBLICATION supabase_realtime ADD TABLE public.activity_logs;
+-- Realtime 활성화 (터미널 탭 실시간 스트림용) - 이미 추가된 경우 무시
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND tablename = 'activity_logs'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.activity_logs;
+  END IF;
+END$$;
