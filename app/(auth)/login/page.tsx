@@ -1,11 +1,14 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { logActivity } from '@/lib/supabase/logs'
+
+const SAVED_EMAIL_KEY = 'wholesale_saved_email'
 
 const loginSchema = z.object({
   email: z.string().email('올바른 이메일을 입력해주세요'),
@@ -27,9 +30,25 @@ export default function LoginPage() {
   const [mode, setMode] = useState<'login' | 'signup'>('login')
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [rememberEmail, setRememberEmail] = useState(false)
+  const [autoLogin, setAutoLogin] = useState(false)
 
   const loginForm = useForm<LoginData>({ resolver: zodResolver(loginSchema) })
   const signupForm = useForm<SignupData>({ resolver: zodResolver(signupSchema) })
+
+  // 저장된 이메일 불러오기 & 자동 로그인 시도
+  useEffect(() => {
+    const saved = localStorage.getItem(SAVED_EMAIL_KEY)
+    if (saved) {
+      loginForm.setValue('email', saved)
+      setRememberEmail(true)
+    }
+    // 자동 로그인: 세션이 살아있으면 바로 대시보드로
+    const supabase = createClient()
+    supabase.auth.getSession().then(({ data }) => {
+      if (data.session) router.replace('/dashboard')
+    })
+  }, [])
 
   const handleLogin = async (data: LoginData) => {
     setError(null)
@@ -40,7 +59,15 @@ export default function LoginPage() {
     })
     if (error) {
       setError('이메일 또는 비밀번호가 올바르지 않습니다.')
+      await logActivity({ action_type: 'auth.login', resource_type: 'auth', description: `로그인 실패: ${data.email}`, metadata: { email: data.email, reason: 'invalid_credentials' } })
       return
+    }
+    await logActivity({ action_type: 'auth.login', resource_type: 'auth', description: `로그인: ${data.email}`, metadata: { email: data.email } })
+    // 아이디 저장
+    if (rememberEmail) {
+      localStorage.setItem(SAVED_EMAIL_KEY, data.email)
+    } else {
+      localStorage.removeItem(SAVED_EMAIL_KEY)
     }
     router.push('/dashboard')
     router.refresh()
@@ -58,6 +85,7 @@ export default function LoginPage() {
       setError(error.message)
       return
     }
+    await logActivity({ action_type: 'auth.signup', resource_type: 'auth', description: `회원가입: ${data.email}`, metadata: { email: data.email } })
     setSuccess('가입 확인 이메일을 발송했습니다. 이메일을 확인해주세요.')
     signupForm.reset()
   }
@@ -120,6 +148,20 @@ export default function LoginPage() {
               {loginForm.formState.errors.password && (
                 <p className="text-xs text-red-500 mt-1">{loginForm.formState.errors.password.message}</p>
               )}
+            </div>
+
+            {/* 아이디 저장 / 자동 로그인 */}
+            <div className="flex items-center gap-4 text-sm text-gray-600">
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input type="checkbox" checked={rememberEmail} onChange={e => setRememberEmail(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-300" />
+                아이디 저장
+              </label>
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input type="checkbox" checked={autoLogin} onChange={e => setAutoLogin(e.target.checked)}
+                  className="w-4 h-4 rounded border-gray-300" />
+                자동 로그인
+              </label>
             </div>
 
             {error && (
