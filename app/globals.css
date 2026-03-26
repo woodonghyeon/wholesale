@@ -1,3 +1,36 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@media print {
+  /* 사이드바·헤더·액션버튼 숨김 */
+  .no-print {
+    display: none !important;
+  }
+
+  /* 레이아웃 초기화 — 전체 너비 사용 */
+  body {
+    background: white !important;
+  }
+
+  /* 인쇄 영역이 스크롤 없이 전체 표시 */
+  .print-area {
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  /* 테이블 행 페이지 분리 방지 */
+  tr {
+    page-break-inside: avoid;
+  }
+
+  /* 테이블 헤더 매 페이지 반복 */
+  thead {
+    display: table-header-group;
+  }
+
+  /* 링크 URL 숨김 */
+  a[href]::after {
+    content: none !important;
+  }
+}

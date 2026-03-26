@@ -86,6 +86,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: '시스템',
     icon: '◈',
     items: [
+      { href: '/data-migration', label: '데이터 관리' },
       { href: '/logs', label: '시스템 로그' },
     ],
   },
@@ -113,7 +114,7 @@ export default function Sidebar() {
     if (active) {
       setOpenGroups(prev => {
         if (prev.has(active)) return prev
-        return new Set([...prev, active])
+        return new Set(Array.from(prev).concat(active))
       })
     }
   }, [pathname])

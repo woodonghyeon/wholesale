@@ -216,7 +216,7 @@ export default function PriceListPage() {
       </div>
 
       {/* 등록/수정 모달 */}
-      <Modal isOpen={modalOpen} onClose={() => setModalOpen(false)}
+      <Modal open={modalOpen} onClose={() => setModalOpen(false)}
         title={editRow ? '단가 수정' : '단가 등록'}>
         <div className="space-y-4">
           <div>
@@ -276,7 +276,7 @@ export default function PriceListPage() {
       </Modal>
 
       <ConfirmDialog
-        isOpen={!!deleteId}
+        open={!!deleteId}
         message="이 단가를 삭제하시겠습니까?"
         onConfirm={handleDelete}
         onCancel={() => setDeleteId(null)}
