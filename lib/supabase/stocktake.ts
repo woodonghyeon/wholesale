@@ -90,9 +90,8 @@ export async function applyStocktakeAdjustments(sessionId: string) {
       p_product_id: item.product_id,
       p_business_id: session!.business_id,
       p_warehouse_id: session!.warehouse_id,
-      p_delta: item.difference,
-      p_log_type: 'adjustment',
-      p_note: `재고 실사 조정`,
+      p_quantity: item.difference,
+      p_note: '재고 실사 조정',
     })
   }
 
