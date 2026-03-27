@@ -3,7 +3,10 @@
 -- Supabase SQL Editor에서 실행하세요
 -- ============================================================
 
-CREATE TABLE IF NOT EXISTS public.naver_orders (
+-- 기존 테이블이 있으면 삭제 후 재생성 (초기 설치용)
+DROP TABLE IF EXISTS public.naver_orders CASCADE;
+
+CREATE TABLE public.naver_orders (
   id                          uuid        DEFAULT gen_random_uuid() PRIMARY KEY,
   product_order_id            text        NOT NULL UNIQUE,
   order_id                    text,
