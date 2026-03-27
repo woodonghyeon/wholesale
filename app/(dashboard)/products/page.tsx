@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 import PageHeader from '@/components/ui/PageHeader'
 import Modal from '@/components/ui/Modal'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
-import { getProducts, upsertProduct, deleteProduct } from '@/lib/supabase/products'
+import { getProducts, upsertProduct, deleteProduct, mergeDuplicateProducts } from '@/lib/supabase/products'
 import { getBusinesses } from '@/lib/supabase/businesses'
 import { Product, Business } from '@/lib/types'
 import { formatMoney } from '@/lib/utils/format'
@@ -48,6 +48,7 @@ export default function ProductsPage() {
   const [viewMode, setViewMode] = useState<ViewMode>('list')
   const [pageSize, setPageSize] = useState(50)
   const [page, setPage] = useState(1)
+  const [merging, setMerging] = useState(false)
 
   useEffect(() => { loadAll() }, [])
 
@@ -71,6 +72,17 @@ export default function ProductsPage() {
       setModalOpen(false); setEditItem({})
       setProducts(await getProducts())
     } catch (e: unknown) { toast.error((e as Error).message) }
+  }
+
+  async function handleMergeDuplicates() {
+    setMerging(true)
+    try {
+      const count = await mergeDuplicateProducts()
+      if (count === 0) toast.success('중복 상품이 없습니다')
+      else toast.success(`${count}개의 중복 상품을 병합했습니다`)
+      setProducts(await getProducts())
+    } catch (e: unknown) { toast.error((e as Error).message) }
+    finally { setMerging(false) }
   }
 
   async function handleDelete() {
@@ -120,6 +132,13 @@ export default function ProductsPage() {
         description={`총 ${filtered.length}개${filtered.length !== products.length ? ` (전체 ${products.length}개)` : ''}`}
         action={
           <div className="flex gap-2">
+            <button
+              onClick={handleMergeDuplicates}
+              disabled={merging}
+              className="px-4 py-2 bg-orange-50 text-orange-700 text-sm rounded-lg hover:bg-orange-100 border border-orange-200 disabled:opacity-50"
+            >
+              {merging ? '병합 중...' : '중복 상품 정리'}
+            </button>
             <button
               onClick={() => {
                 const biz = bizFilter !== 'all' ? `&businessId=${bizFilter}` : ''

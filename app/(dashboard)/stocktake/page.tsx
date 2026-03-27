@@ -112,8 +112,9 @@ export default function StocktakePage() {
 
   const countedCount = items.filter(i => i.actual_quantity !== null).length
   const diffItems = items.filter(i => i.actual_quantity !== null && i.difference !== 0)
+  // 선택한 사업자 소속 창고 + 공통 창고(business_id=null) 모두 포함
   const filteredWarehouses = newForm.business_id
-    ? warehouses.filter(w => w.business_id === newForm.business_id)
+    ? warehouses.filter(w => w.business_id === newForm.business_id || w.business_id === null)
     : warehouses
 
   return (

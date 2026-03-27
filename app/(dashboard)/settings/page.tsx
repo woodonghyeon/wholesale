@@ -234,18 +234,19 @@ export default function SettingsPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 text-gray-500 text-xs">
                     <tr>
-                      {['창고명','주소','메모',''].map(h => (
+                      {['창고명','사업자','주소','메모',''].map(h => (
                         <th key={h} className="px-4 py-3 text-left font-medium">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
                     {warehouses.length === 0 && (
-                      <tr><td colSpan={4} className="px-4 py-8 text-center text-gray-400">창고가 없습니다</td></tr>
+                      <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">창고가 없습니다</td></tr>
                     )}
                     {warehouses.map(w => (
                       <tr key={w.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3 font-medium">{w.name}</td>
+                        <td className="px-4 py-3 text-gray-500">{businesses.find(b => b.id === w.business_id)?.name ?? <span className="text-gray-300">-</span>}</td>
                         <td className="px-4 py-3 text-gray-500">{w.address ?? '-'}</td>
                         <td className="px-4 py-3 text-gray-500">{w.note ?? '-'}</td>
                         <td className="px-4 py-3 text-right">
@@ -416,6 +417,12 @@ export default function SettingsPage() {
         <div className="space-y-4">
           <div><label className={labelCls}>창고명 *</label>
             <input className={inputCls} value={editWh.name ?? ''} onChange={e => setEditWh(p => ({ ...p, name: e.target.value }))} /></div>
+          <div><label className={labelCls}>사업자</label>
+            <select className={inputCls} value={editWh.business_id ?? ''} onChange={e => setEditWh(p => ({ ...p, business_id: e.target.value || null }))}>
+              <option value="">선택 안 함 (공통 창고)</option>
+              {businesses.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          </div>
           <div><label className={labelCls}>주소</label>
             <input className={inputCls} value={editWh.address ?? ''} onChange={e => setEditWh(p => ({ ...p, address: e.target.value }))} /></div>
           <div><label className={labelCls}>메모</label>

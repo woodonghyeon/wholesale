@@ -1,14 +1,16 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { toast } from 'sonner'
 import PageHeader from '@/components/ui/PageHeader'
 import Modal from '@/components/ui/Modal'
 import { getInventory, adjustInventory, InventoryRow } from '@/lib/supabase/inventory'
 import { getBusinesses } from '@/lib/supabase/businesses'
 import { getWarehouses } from '@/lib/supabase/warehouses'
+import { upsertProduct } from '@/lib/supabase/products'
 import { Business, Warehouse } from '@/lib/types'
 import { formatMoney } from '@/lib/utils/format'
+import type { BarcodeLookupResult } from '@/app/api/barcode/lookup/route'
 
 const inputCls = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
 const labelCls = 'block text-sm font-medium text-gray-700 mb-1'
@@ -39,6 +41,22 @@ export default function InventoryPage() {
   const [adjustTarget, setAdjustTarget] = useState<InventoryRow | null>(null)
   const [adjustQty, setAdjustQty] = useState(0)
   const [adjustNote, setAdjustNote] = useState('')
+
+  // 바코드 스캐너
+  const [scanMode, setScanMode] = useState(false)
+  const [scanInput, setScanInput] = useState('')
+  const [scanLookup, setScanLookup] = useState<BarcodeLookupResult | null>(null)
+  const [scanLoading, setScanLoading] = useState(false)
+  const [scanModal, setScanModal] = useState(false)
+  const [scanQty, setScanQty] = useState(1)
+  const [scanBizId, setScanBizId] = useState('')
+  const [scanWhId, setScanWhId] = useState('')
+  const [scanProductForm, setScanProductForm] = useState<{ name: string; category: string; buy_price: number; sell_price: number; unit: string }>({
+    name: '', category: '', buy_price: 0, sell_price: 0, unit: 'ea',
+  })
+  const scanInputRef = useRef<HTMLInputElement>(null)
+  const lastKeyTime = useRef<number>(0)
+  const barcodeBuffer = useRef<string>('')
 
   useEffect(() => { loadAll() }, [])
 
@@ -94,6 +112,75 @@ export default function InventoryPage() {
     } catch (e: unknown) { toast.error((e as Error).message) }
   }
 
+  const lookupBarcode = useCallback(async (barcode: string) => {
+    if (!barcode.trim()) return
+    setScanLoading(true)
+    try {
+      const res = await fetch(`/api/barcode/lookup?barcode=${encodeURIComponent(barcode.trim())}`)
+      const data: BarcodeLookupResult = await res.json()
+      setScanLookup(data)
+      if (data.product) {
+        setScanProductForm({
+          name: data.product.name,
+          category: data.product.category ?? '',
+          buy_price: data.product.buy_price ?? 0,
+          sell_price: data.product.sell_price ?? 0,
+          unit: data.product.unit ?? 'ea',
+        })
+      }
+      setScanModal(true)
+    } catch (e: unknown) { toast.error((e as Error).message) }
+    finally { setScanLoading(false) }
+  }, [])
+
+  // 바코드 스캐너: 50ms 이내 연속 입력 감지 후 Enter로 확정
+  const handleScanKey = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    const now = Date.now()
+    if (e.key === 'Enter') {
+      const barcode = scanInput.trim()
+      if (barcode) lookupBarcode(barcode)
+      setScanInput('')
+      barcodeBuffer.current = ''
+    }
+    lastKeyTime.current = now
+  }, [scanInput, lookupBarcode])
+
+  async function submitScanRegister() {
+    if (!scanLookup || !scanBizId || !scanWhId) return toast.error('사업자와 창고를 선택해주세요')
+    const barcode = scanInput || (scanLookup.product?.barcode ?? '')
+    try {
+      // 상품 등록/업데이트
+      const product = await upsertProduct({
+        ...(scanLookup.source === 'db' && scanLookup.product?.id ? { id: scanLookup.product.id } : {}),
+        name: scanProductForm.name,
+        barcode: scanLookup.product?.barcode ?? barcode,
+        category: scanProductForm.category || undefined,
+        buy_price: scanProductForm.buy_price,
+        sell_price: scanProductForm.sell_price,
+        unit: scanProductForm.unit,
+        business_id: scanBizId,
+        min_stock: 0,
+        is_bundle: false,
+      })
+      // 재고 조정
+      await adjustInventory({
+        product_id: product.id,
+        business_id: scanBizId,
+        warehouse_id: scanWhId,
+        quantity: scanQty,
+        note: `바코드 스캔 입고: ${scanProductForm.name}`,
+      })
+      toast.success(`${scanProductForm.name} — ${scanQty}개 재고 등록 완료`)
+      setScanModal(false)
+      setScanLookup(null)
+      setScanQty(1)
+      setScanInput('')
+      await loadInventory()
+      // 스캔 모드 유지, 다음 스캔 대기
+      setTimeout(() => scanInputRef.current?.focus(), 100)
+    } catch (e: unknown) { toast.error((e as Error).message) }
+  }
+
   const filtered = rows.filter(r => {
     const matchSearch = !search || r.product_name.includes(search) || r.barcode?.includes(search) || r.category?.includes(search) || false
     const matchLow = !showLow || (r.min_stock > 0 && r.quantity <= r.min_stock)
@@ -105,7 +192,43 @@ export default function InventoryPage() {
 
   return (
     <div>
-      <PageHeader title="재고 관리" description={`총 ${filtered.length}개 품목 · 재고 가치 ${formatMoney(totalValue)}원`} />
+      <PageHeader
+        title="재고 관리"
+        description={`총 ${filtered.length}개 품목 · 재고 가치 ${formatMoney(totalValue)}원`}
+        action={
+          <button
+            onClick={() => {
+              setScanMode(v => !v)
+              if (!scanMode) setTimeout(() => scanInputRef.current?.focus(), 100)
+            }}
+            className={`px-4 py-2 text-sm rounded-lg border transition-colors ${scanMode ? 'bg-green-600 text-white border-green-600' : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'}`}
+          >
+            {scanMode ? '● 스캔 중...' : '바코드 스캔'}
+          </button>
+        }
+      />
+
+      {/* 바코드 스캔 입력 영역 */}
+      {scanMode && (
+        <div className="mb-5 p-4 bg-green-50 border border-green-200 rounded-2xl flex items-center gap-3">
+          <span className="text-2xl">📷</span>
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-green-800 mb-1">바코드 스캐너 활성화 — 스캐너로 바코드를 스캔하거나 직접 입력 후 Enter</p>
+            <input
+              ref={scanInputRef}
+              type="text"
+              value={scanInput}
+              onChange={e => setScanInput(e.target.value)}
+              onKeyDown={handleScanKey}
+              placeholder="바코드 번호 입력 후 Enter..."
+              className="w-full max-w-xs border border-green-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500"
+              autoComplete="off"
+            />
+          </div>
+          {scanLoading && <span className="text-sm text-green-600 animate-pulse">조회 중...</span>}
+          <button onClick={() => setScanMode(false)} className="text-gray-400 hover:text-gray-600 text-sm">✕ 종료</button>
+        </div>
+      )}
 
       {/* 발주 추천 섹션 */}
       {velocity.size > 0 && (() => {
@@ -280,6 +403,81 @@ export default function InventoryPage() {
             <div className="flex gap-2 justify-end pt-2">
               <button onClick={() => setAdjustModal(false)} className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50">취소</button>
               <button onClick={submitAdjust} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">조정 적용</button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* 바코드 스캔 결과 모달 */}
+      <Modal open={scanModal} onClose={() => { setScanModal(false); setTimeout(() => scanInputRef.current?.focus(), 100) }} title="바코드 스캔 결과" size="sm">
+        {scanLookup && (
+          <div className="space-y-4">
+            {/* 조회 결과 배지 */}
+            <div className={`text-xs px-3 py-2 rounded-lg ${scanLookup.source === 'db' ? 'bg-green-50 text-green-700' : scanLookup.source === 'naver' ? 'bg-blue-50 text-blue-700' : 'bg-gray-50 text-gray-500'}`}>
+              {scanLookup.source === 'db' && '✓ 기존 등록 상품 — 수량만 추가됩니다'}
+              {scanLookup.source === 'naver' && '네이버 쇼핑에서 정보를 가져왔습니다. 확인 후 저장하세요.'}
+              {scanLookup.source === 'none' && '등록되지 않은 바코드입니다. 상품 정보를 직접 입력해주세요.'}
+            </div>
+
+            {/* 상품 정보 (DB 조회가 아닌 경우 수정 가능) */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <label className={labelCls}>상품명 *</label>
+                <input className={inputCls} value={scanProductForm.name}
+                  onChange={e => setScanProductForm(p => ({ ...p, name: e.target.value }))}
+                  readOnly={scanLookup.source === 'db'} />
+              </div>
+              <div>
+                <label className={labelCls}>카테고리</label>
+                <input className={inputCls} value={scanProductForm.category}
+                  onChange={e => setScanProductForm(p => ({ ...p, category: e.target.value }))}
+                  readOnly={scanLookup.source === 'db'} />
+              </div>
+              <div>
+                <label className={labelCls}>단위</label>
+                <input className={inputCls} value={scanProductForm.unit}
+                  onChange={e => setScanProductForm(p => ({ ...p, unit: e.target.value }))}
+                  readOnly={scanLookup.source === 'db'} />
+              </div>
+              <div>
+                <label className={labelCls}>매입가</label>
+                <input type="number" className={inputCls} value={scanProductForm.buy_price}
+                  onChange={e => setScanProductForm(p => ({ ...p, buy_price: parseInt(e.target.value) || 0 }))} />
+              </div>
+              <div>
+                <label className={labelCls}>판매가</label>
+                <input type="number" className={inputCls} value={scanProductForm.sell_price}
+                  onChange={e => setScanProductForm(p => ({ ...p, sell_price: parseInt(e.target.value) || 0 }))} />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className={labelCls}>입고 수량 *</label>
+                <input type="number" min="1" className={inputCls} value={scanQty}
+                  onChange={e => setScanQty(parseInt(e.target.value) || 1)} />
+              </div>
+              <div>
+                <label className={labelCls}>사업자 *</label>
+                <select className={inputCls} value={scanBizId} onChange={e => setScanBizId(e.target.value)}>
+                  <option value="">선택</option>
+                  {businesses.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className={labelCls}>창고 *</label>
+                <select className={inputCls} value={scanWhId} onChange={e => setScanWhId(e.target.value)}>
+                  <option value="">선택</option>
+                  {warehouses.map(w => <option key={w.id} value={w.id}>{w.name}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex gap-2 justify-end pt-2">
+              <button onClick={() => { setScanModal(false); setTimeout(() => scanInputRef.current?.focus(), 100) }}
+                className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50">취소</button>
+              <button onClick={submitScanRegister}
+                className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700">재고 등록</button>
             </div>
           </div>
         )}
