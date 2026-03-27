@@ -10,7 +10,7 @@ import { getChannels, upsertChannel, deleteChannel } from '@/lib/supabase/channe
 import { getWarehouses, upsertWarehouse, deleteWarehouse } from '@/lib/supabase/warehouses'
 import { Business, Channel, Warehouse } from '@/lib/types'
 
-type Tab = 'businesses' | 'channels' | 'warehouses'
+type Tab = 'businesses' | 'channels' | 'warehouses' | 'integrations'
 
 export default function SettingsPage() {
   const [tab, setTab] = useState<Tab>('businesses')
@@ -18,6 +18,42 @@ export default function SettingsPage() {
   const [channels, setChannels] = useState<Channel[]>([])
   const [warehouses, setWarehouses] = useState<Warehouse[]>([])
   const [loading, setLoading] = useState(true)
+  const [naverStatus, setNaverStatus] = useState<'idle' | 'checking' | 'ok' | 'error'>('idle')
+  const [naverError, setNaverError] = useState<string | null>(null)
+  const [telegramStatus, setTelegramStatus] = useState<'idle' | 'checking' | 'ok' | 'error'>('idle')
+  const [telegramError, setTelegramError] = useState<string | null>(null)
+
+  async function checkTelegramConnection() {
+    setTelegramStatus('checking')
+    setTelegramError(null)
+    try {
+      const res = await fetch('/api/telegram/test')
+      const data = await res.json()
+      if (data.success) setTelegramStatus('ok')
+      else { setTelegramStatus('error'); setTelegramError(data.error ?? '연결 실패') }
+    } catch (e: unknown) {
+      setTelegramStatus('error')
+      setTelegramError((e as Error).message)
+    }
+  }
+
+  async function checkNaverConnection() {
+    setNaverStatus('checking')
+    setNaverError(null)
+    try {
+      const res = await fetch('/api/naver/test')
+      const data = await res.json()
+      if (data.success) {
+        setNaverStatus('ok')
+      } else {
+        setNaverStatus('error')
+        setNaverError(data.error ?? '연결 실패')
+      }
+    } catch (e: unknown) {
+      setNaverStatus('error')
+      setNaverError((e as Error).message)
+    }
+  }
 
   // 모달 상태
   const [bizModal, setBizModal] = useState(false)
@@ -88,6 +124,7 @@ export default function SettingsPage() {
     { key: 'businesses', label: '사업자' },
     { key: 'channels', label: '판매채널' },
     { key: 'warehouses', label: '창고' },
+    { key: 'integrations', label: '외부 연동' },
   ]
 
   const inputCls = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
@@ -220,6 +257,111 @@ export default function SettingsPage() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {/* ── 외부 연동 ── */}
+          {tab === 'integrations' && (
+            <div className="space-y-4">
+              {/* 네이버 스마트스토어 */}
+              <div className="bg-white rounded-xl border border-gray-100 p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center text-lg">N</div>
+                    <div>
+                      <p className="font-semibold text-gray-800">네이버 스마트스토어</p>
+                      <p className="text-xs text-gray-500">주문·반품 자동 동기화</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {naverStatus === 'ok' && (
+                      <span className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded-full">연결됨</span>
+                    )}
+                    {naverStatus === 'error' && (
+                      <span className="text-xs px-2 py-1 bg-red-100 text-red-600 rounded-full">연결 실패</span>
+                    )}
+                    <button
+                      onClick={checkNaverConnection}
+                      disabled={naverStatus === 'checking'}
+                      className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      {naverStatus === 'checking' ? '확인 중...' : '연결 테스트'}
+                    </button>
+                  </div>
+                </div>
+                {naverError && (
+                  <div className="mt-2 text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg">
+                    {naverError}
+                  </div>
+                )}
+                {naverStatus === 'ok' && (
+                  <div className="mt-2 text-xs text-green-700 bg-green-50 px-3 py-2 rounded-lg">
+                    API 인증 성공. 채널별 매출 / 반품 페이지에서 동기화 버튼을 사용하세요.
+                  </div>
+                )}
+                <div className="mt-3 pt-3 border-t border-gray-50 text-xs text-gray-400 space-y-1">
+                  <p>· 환경변수: <code className="bg-gray-100 px-1 rounded">NAVER_COMMERCE_CLIENT_ID</code>, <code className="bg-gray-100 px-1 rounded">NAVER_COMMERCE_CLIENT_SECRET</code></p>
+                  <p>· 동기화 대상: 주문 (채널별 매출), 반품 클레임</p>
+                </div>
+              </div>
+
+              {/* 텔레그램 알림 */}
+              <div className="bg-white rounded-xl border border-gray-100 p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-blue-100 rounded-xl flex items-center justify-center text-lg font-bold text-blue-600">T</div>
+                    <div>
+                      <p className="font-semibold text-gray-800">텔레그램 알림</p>
+                      <p className="text-xs text-gray-500">신규 주문·반품 발생 시 자동 알림</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {telegramStatus === 'ok' && (
+                      <span className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded-full">연결됨</span>
+                    )}
+                    {telegramStatus === 'error' && (
+                      <span className="text-xs px-2 py-1 bg-red-100 text-red-600 rounded-full">연결 실패</span>
+                    )}
+                    <button
+                      onClick={checkTelegramConnection}
+                      disabled={telegramStatus === 'checking'}
+                      className="px-3 py-1.5 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      {telegramStatus === 'checking' ? '확인 중...' : '연결 테스트'}
+                    </button>
+                  </div>
+                </div>
+                {telegramError && (
+                  <div className="mt-2 text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg">{telegramError}</div>
+                )}
+                {telegramStatus === 'ok' && (
+                  <div className="mt-2 text-xs text-green-700 bg-green-50 px-3 py-2 rounded-lg">
+                    텔레그램 봇 연결 성공. 신규 주문·반품 시 자동으로 메시지가 발송됩니다.
+                  </div>
+                )}
+                <div className="mt-3 pt-3 border-t border-gray-50 text-xs text-gray-400 space-y-1">
+                  <p>· 환경변수: <code className="bg-gray-100 px-1 rounded">TELEGRAM_BOT_TOKEN</code>, <code className="bg-gray-100 px-1 rounded">TELEGRAM_CHAT_ID</code></p>
+                  <p>· 봇 생성: 텔레그램에서 <code className="bg-gray-100 px-1 rounded">@BotFather</code> 검색 → /newbot</p>
+                  <p>· Chat ID 확인: 봇에게 메시지 전송 후 <code className="bg-gray-100 px-1 rounded">api.telegram.org/bot토큰/getUpdates</code> 호출</p>
+                </div>
+              </div>
+
+              {/* 미연동 서비스 */}
+              {[
+                { name: '쿠팡 파트너스', desc: '쿠팡 주문 연동' },
+                { name: '카카오 알림톡', desc: '주문·입금 알림 발송' },
+                { name: '홈택스', desc: '전자세금계산서 연동' },
+              ].map(svc => (
+                <div key={svc.name} className="bg-white rounded-xl border border-gray-100 p-5 opacity-60">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-semibold text-gray-700">{svc.name}</p>
+                      <p className="text-xs text-gray-400">{svc.desc}</p>
+                    </div>
+                    <span className="text-xs px-2 py-1 bg-gray-100 text-gray-500 rounded-full">준비 중</span>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </>

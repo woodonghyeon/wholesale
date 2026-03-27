@@ -32,7 +32,6 @@ export default function ReturnsPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [editItem, setEditItem] = useState<Partial<Return>>({})
   const [confirmId, setConfirmId] = useState<string | null>(null)
-
   useEffect(() => {
     Promise.all([getBusinesses(), getPartners(), getProducts()])
       .then(([b, p, pr]) => { setBusinesses(b); setPartners(p); setProducts(pr) })
@@ -70,8 +69,10 @@ export default function ReturnsPage() {
         title="반품·불량 관리"
         description={`총 ${returns.length}건`}
         action={
-          <button onClick={() => { setEditItem({ business_id: businesses[0]?.id, quantity: 1, status: 'received', restock_done: false }); setModalOpen(true) }}
-            className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">+ 반품 등록</button>
+          <div className="flex gap-2">
+            <button onClick={() => { setEditItem({ business_id: businesses[0]?.id, quantity: 1, status: 'received', restock_done: false }); setModalOpen(true) }}
+              className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">+ 반품 등록</button>
+          </div>
         }
       />
 

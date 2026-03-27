@@ -32,6 +32,11 @@ export async function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl
 
+  // API 라우트는 인증 미들웨어 제외
+  if (pathname.startsWith('/api/')) {
+    return supabaseResponse
+  }
+
   // 미인증 사용자 → 로그인 페이지로
   if (!user && !pathname.startsWith('/login')) {
     return NextResponse.redirect(new URL('/login', request.url))

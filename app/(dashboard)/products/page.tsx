@@ -68,10 +68,12 @@ export default function ProductsPage() {
         title="상품 관리"
         description={`총 ${filtered.length}개`}
         action={
-          <button onClick={() => { setEditItem({ unit: 'ea', buy_price: 0, sell_price: 0, min_stock: 0, is_bundle: false }); setModalOpen(true) }}
-            className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
-            + 상품 추가
-          </button>
+          <div className="flex gap-2">
+            <button onClick={() => { setEditItem({ unit: 'ea', buy_price: 0, sell_price: 0, min_stock: 0, is_bundle: false }); setModalOpen(true) }}
+              className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
+              + 상품 추가
+            </button>
+          </div>
         }
       />
 

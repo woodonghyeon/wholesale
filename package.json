@@ -12,8 +12,11 @@
     "@hookform/resolvers": "^5.2.2",
     "@supabase/ssr": "^0.9.0",
     "@supabase/supabase-js": "^2.100.0",
+    "@types/node-cron": "^3.0.11",
+    "bcryptjs": "^3.0.3",
     "date-fns": "^4.1.0",
     "next": "14.2.35",
+    "node-cron": "^4.2.1",
     "react": "^18",
     "react-dom": "^18",
     "react-hook-form": "^7.72.0",
@@ -24,6 +27,7 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",

@@ -35,17 +35,53 @@ function MiniBar({ value, max }: { value: number; max: number }) {
   )
 }
 
+interface NaverStats {
+  summary: {
+    total: number; totalRevenue: number
+    todayCount: number; todayRevenue: number
+    weekCount: number; weekRevenue: number
+    canceledCount: number; returnedCount: number
+  }
+  topProducts: { name: string; revenue: number; qty: number }[]
+  daily: { date: string; count: number; revenue: number }[]
+  recentOrders: { productOrderId: string; productName: string; ordererName: string; totalPaymentAmount: number; status: string; orderDate: string }[]
+}
+
+const STATUS_LABEL: Record<string, { label: string; color: string }> = {
+  PURCHASE_DECIDED: { label: '구매확정', color: 'bg-green-100 text-green-700' },
+  DELIVERED: { label: '배송완료', color: 'bg-blue-100 text-blue-700' },
+  DELIVERING: { label: '배송중', color: 'bg-sky-100 text-sky-700' },
+  PAYED: { label: '결제완료', color: 'bg-indigo-100 text-indigo-700' },
+  CANCELED: { label: '취소', color: 'bg-red-100 text-red-600' },
+  CANCEL_REQUEST: { label: '취소요청', color: 'bg-red-100 text-red-600' },
+  RETURNED: { label: '반품', color: 'bg-orange-100 text-orange-600' },
+  RETURN_REQUEST: { label: '반품요청', color: 'bg-orange-100 text-orange-600' },
+}
+
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [businesses, setBusinesses] = useState<Business[]>([])
   const [bizFilter, setBizFilter] = useState('all')
   const [loading, setLoading] = useState(true)
+  const [naverStats, setNaverStats] = useState<NaverStats | null>(null)
+  const [naverLoading, setNaverLoading] = useState(true)
 
   useEffect(() => {
     getBusinesses().then(setBusinesses).catch(() => {})
+    loadNaverStats()
   }, [])
 
   useEffect(() => { load() }, [bizFilter])
+
+  async function loadNaverStats() {
+    setNaverLoading(true)
+    try {
+      const res = await fetch('/api/naver/stats')
+      const data = await res.json()
+      if (data.success) setNaverStats(data)
+    } catch { /* 네이버 미연동 시 무시 */ }
+    finally { setNaverLoading(false) }
+  }
 
   async function load() {
     setLoading(true)
@@ -56,6 +92,7 @@ export default function DashboardPage() {
   }
 
   const maxTrend = stats ? Math.max(...stats.monthlySalesTrend.map(m => m.amount), 1) : 1
+  const maxDaily = naverStats ? Math.max(...naverStats.daily.map(d => d.revenue), 1) : 1
 
   return (
     <div>
@@ -137,6 +174,121 @@ export default function DashboardPage() {
               </div>
             </div>
           </div>
+
+          {/* 네이버 스마트스토어 실시간 현황 */}
+          {naverLoading ? (
+            <div className="bg-white rounded-2xl border border-green-100 p-5">
+              <p className="text-sm text-gray-400">네이버 스마트스토어 데이터 불러오는 중...</p>
+            </div>
+          ) : naverStats && (
+            <div className="space-y-4">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 bg-green-500 rounded-md flex items-center justify-center text-white text-xs font-bold">N</div>
+                <p className="text-sm font-semibold text-gray-800">네이버 스마트스토어 실시간 현황</p>
+                <span className="text-xs text-gray-400">(최근 30일)</span>
+                <button onClick={loadNaverStats} className="ml-auto text-xs text-gray-400 hover:text-gray-600">↺ 새로고침</button>
+              </div>
+
+              {/* 요약 카드 4개 */}
+              <div className="grid grid-cols-4 gap-3">
+                <div className="bg-green-50 border border-green-100 rounded-xl p-4">
+                  <p className="text-xs text-green-600 mb-1">오늘 주문</p>
+                  <p className="text-2xl font-bold text-green-700">{naverStats.summary.todayCount}<span className="text-sm font-normal ml-1">건</span></p>
+                  <p className="text-xs text-green-500 mt-1">{naverStats.summary.todayRevenue.toLocaleString()}원</p>
+                </div>
+                <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
+                  <p className="text-xs text-blue-600 mb-1">최근 7일 주문</p>
+                  <p className="text-2xl font-bold text-blue-700">{naverStats.summary.weekCount}<span className="text-sm font-normal ml-1">건</span></p>
+                  <p className="text-xs text-blue-500 mt-1">{naverStats.summary.weekRevenue.toLocaleString()}원</p>
+                </div>
+                <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
+                  <p className="text-xs text-indigo-600 mb-1">30일 총 매출</p>
+                  <p className="text-2xl font-bold text-indigo-700">{Math.round(naverStats.summary.totalRevenue / 10000)}<span className="text-sm font-normal ml-1">만원</span></p>
+                  <p className="text-xs text-indigo-500 mt-1">{naverStats.summary.total}건</p>
+                </div>
+                <div className="bg-red-50 border border-red-100 rounded-xl p-4">
+                  <p className="text-xs text-red-500 mb-1">취소·반품</p>
+                  <p className="text-2xl font-bold text-red-600">{naverStats.summary.canceledCount + naverStats.summary.returnedCount}<span className="text-sm font-normal ml-1">건</span></p>
+                  <p className="text-xs text-red-400 mt-1">취소 {naverStats.summary.canceledCount} / 반품 {naverStats.summary.returnedCount}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                {/* 14일 일별 막대 그래프 */}
+                <div className="col-span-2 bg-white border border-gray-100 rounded-xl p-4">
+                  <p className="text-xs font-medium text-gray-600 mb-3">최근 14일 일별 매출</p>
+                  <div className="flex items-end gap-1" style={{ height: 80 }}>
+                    {naverStats.daily.map(d => {
+                      const pct = (d.revenue / maxDaily) * 100
+                      const isToday = d.date === new Date().toISOString().slice(0, 10)
+                      return (
+                        <div key={d.date} className="flex-1 flex flex-col items-center gap-0.5" title={`${d.date}: ${d.revenue.toLocaleString()}원 (${d.count}건)`}>
+                          <div className="w-full flex flex-col justify-end" style={{ height: 68 }}>
+                            <div
+                              className={`w-full rounded-sm transition-all ${isToday ? 'bg-green-500' : 'bg-green-200'}`}
+                              style={{ height: `${Math.max(pct, d.revenue > 0 ? 4 : 0)}%` }}
+                            />
+                          </div>
+                          <span className="text-gray-300 text-center" style={{ fontSize: 8 }}>
+                            {d.date.slice(8)}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {/* 상품별 TOP5 */}
+                <div className="bg-white border border-gray-100 rounded-xl p-4">
+                  <p className="text-xs font-medium text-gray-600 mb-3">상품별 매출 TOP 5</p>
+                  <div className="space-y-2">
+                    {naverStats.topProducts.map((p, i) => (
+                      <div key={p.name}>
+                        <div className="flex justify-between text-xs mb-0.5">
+                          <span className="text-gray-600 truncate max-w-[120px]" title={p.name}>
+                            <span className="text-gray-400 mr-1">{i + 1}</span>{p.name}
+                          </span>
+                          <span className="text-gray-500 ml-1 shrink-0">{Math.round(p.revenue / 1000)}k</span>
+                        </div>
+                        <div className="h-1 bg-gray-100 rounded-full">
+                          <div
+                            className="h-1 bg-green-400 rounded-full"
+                            style={{ width: `${(p.revenue / naverStats.topProducts[0].revenue) * 100}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* 최근 주문 5건 */}
+              <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
+                <div className="flex items-center justify-between px-4 py-3 border-b border-gray-50">
+                  <p className="text-xs font-medium text-gray-600">최근 주문</p>
+                  <Link href="/channel-sales" className="text-xs text-green-600 hover:underline">채널별 매출 →</Link>
+                </div>
+                <table className="w-full text-xs">
+                  <tbody className="divide-y divide-gray-50">
+                    {naverStats.recentOrders.map(o => {
+                      const st = STATUS_LABEL[o.status] ?? { label: o.status, color: 'bg-gray-100 text-gray-500' }
+                      return (
+                        <tr key={o.productOrderId} className="hover:bg-gray-50">
+                          <td className="px-4 py-2.5 text-gray-400 font-mono">{o.orderDate.slice(5, 10)}</td>
+                          <td className="px-4 py-2.5 font-medium text-gray-700 max-w-[200px] truncate">{o.productName}</td>
+                          <td className="px-4 py-2.5 text-gray-500">{o.ordererName}</td>
+                          <td className="px-4 py-2.5 font-medium text-green-600">{o.totalPaymentAmount.toLocaleString()}원</td>
+                          <td className="px-4 py-2.5">
+                            <span className={`px-1.5 py-0.5 rounded-full text-xs ${st.color}`}>{st.label}</span>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* 최근 거래 */}
           <div className="bg-white rounded-2xl border border-gray-100 p-5">
