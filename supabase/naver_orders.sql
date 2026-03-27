@@ -9,22 +9,22 @@ CREATE TABLE IF NOT EXISTS public.naver_orders (
   order_id                    text,
   order_date                  timestamptz,
   payment_date                timestamptz,
-  status                      text,
+  order_status                text,
 
   -- 상품 정보
   product_name                text,
-  product_no                  text,        -- originProductNo
-  channel_product_no          text,        -- channelProductNo
-  product_option              text,        -- 옵션 문자열
+  product_no                  text,
+  channel_product_no          text,
+  product_option              text,
 
   -- 수량 / 금액
   quantity                    integer,
   unit_price                  integer,
   total_payment_amount        integer,
   discount_amount             integer      DEFAULT 0,
-  expected_settlement_amount  integer      DEFAULT 0,  -- 정산 예정금
-  payment_commission          integer      DEFAULT 0,  -- 결제 수수료
-  sale_commission             integer      DEFAULT 0,  -- 판매 수수료
+  expected_settlement_amount  integer      DEFAULT 0,
+  payment_commission          integer      DEFAULT 0,
+  sale_commission             integer      DEFAULT 0,
 
   -- 주문자
   orderer_name                text,
@@ -44,8 +44,8 @@ CREATE TABLE IF NOT EXISTS public.naver_orders (
   delivery_status             text,
 
   -- 기타
-  inflow_path                 text,        -- 유입 경로 (검색, 광고 등)
-  payment_means               text,        -- 결제 수단 (CARD, NPAY 등)
+  inflow_path                 text,
+  payment_means               text,
   is_membership_subscribed    boolean      DEFAULT false,
 
   -- 메타
@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS public.naver_orders (
 -- 인덱스
 CREATE INDEX IF NOT EXISTS naver_orders_order_date_idx    ON public.naver_orders (order_date DESC);
 CREATE INDEX IF NOT EXISTS naver_orders_payment_date_idx  ON public.naver_orders (payment_date DESC);
-CREATE INDEX IF NOT EXISTS naver_orders_status_idx        ON public.naver_orders (status);
+CREATE INDEX IF NOT EXISTS naver_orders_order_status_idx  ON public.naver_orders (order_status);
 CREATE INDEX IF NOT EXISTS naver_orders_business_id_idx   ON public.naver_orders (business_id);
 CREATE INDEX IF NOT EXISTS naver_orders_tracking_idx      ON public.naver_orders (tracking_number) WHERE tracking_number IS NOT NULL;
 
@@ -68,7 +68,6 @@ DROP POLICY IF EXISTS "authenticated can manage naver_orders" ON public.naver_or
 CREATE POLICY "authenticated can manage naver_orders"
   ON public.naver_orders FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
--- service role (서버 API 직접 접근)
 DROP POLICY IF EXISTS "service role can manage naver_orders" ON public.naver_orders;
 CREATE POLICY "service role can manage naver_orders"
   ON public.naver_orders FOR ALL TO service_role USING (true) WITH CHECK (true);

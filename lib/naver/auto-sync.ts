@@ -62,7 +62,7 @@ async function saveOrdersToDB(orders: NaverProductOrder[]) {
       order_id:                   order.orderId,
       order_date:                 order.orderDate || null,
       payment_date:               order.paymentDate || null,
-      status:                     order.productOrderStatus,
+      order_status:               order.productOrderStatus,
       product_name:               order.productName,
       product_no:                 order.productNo || null,
       channel_product_no:         order.channelProductNo || null,

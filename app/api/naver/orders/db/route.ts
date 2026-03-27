@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
       .gte('order_date', from)
       .order('order_date', { ascending: false })
 
-    if (status) query = query.eq('status', status)
+    if (status) query = query.eq('order_status', status)
     if (tracking === 'only') query = query.not('tracking_number', 'is', null).neq('tracking_number', '')
     if (search) {
       query = query.or(
