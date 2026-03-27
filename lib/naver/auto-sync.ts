@@ -221,6 +221,58 @@ async function saveProductsToDB() {
   }
 }
 
+// ── 고객 자동 DB 구축 (주문자 → partners 테이블 upsert) ────────
+async function upsertCustomersToDB(orders: NaverProductOrder[]) {
+  if (!orders.length) return
+  const supabase = adminClient()
+
+  const { data: businesses } = await supabase
+    .from('businesses')
+    .select('id')
+    .order('created_at')
+    .limit(1)
+  const businessId = businesses?.[0]?.id
+  if (!businessId) return
+
+  // 전화번호 기준으로 중복 제거
+  const customerMap = new Map<string, NaverProductOrder>()
+  for (const o of orders) {
+    if (!o.ordererTel) continue
+    const tel = o.ordererTel.replace(/[^0-9]/g, '')
+    if (!customerMap.has(tel)) customerMap.set(tel, o)
+  }
+
+  for (const [tel, o] of Array.from(customerMap.entries())) {
+    // 이미 있는지 전화번호로 조회
+    const { data: existing } = await supabase
+      .from('partners')
+      .select('id, note')
+      .eq('phone', tel)
+      .eq('business_id', businessId)
+      .maybeSingle()
+
+    if (existing) {
+      // 마지막 주문일 업데이트
+      const notePrefix = `[네이버] 마지막주문: ${(o.paymentDate ?? o.orderDate ?? '').slice(0, 10)}`
+      const prevNote = (existing.note ?? '').replace(/\[네이버\] 마지막주문: \d{4}-\d{2}-\d{2}/g, '').trim()
+      await supabase.from('partners').update({
+        note: `${notePrefix}${prevNote ? ' | ' + prevNote : ''}`,
+      }).eq('id', existing.id)
+    } else {
+      // 신규 고객 등록
+      await supabase.from('partners').insert({
+        business_id:  businessId,
+        name:         o.ordererName || '네이버 고객',
+        partner_type: 'customer',
+        phone:        tel,
+        address:      o.receiverAddress || null,
+        note:         `[네이버] 마지막주문: ${(o.paymentDate ?? o.orderDate ?? '').slice(0, 10)}`,
+        credit_limit: 0,
+      })
+    }
+  }
+}
+
 // ── 메인 동기화 함수 ────────────────────────────────────────────
 export async function runNaverAutoSync(): Promise<{
   newOrders: number
@@ -263,6 +315,7 @@ export async function runNaverAutoSync(): Promise<{
     saveOrdersToDB(newOrders),
     saveClaimsToDB(newClaims),
     saveProductsToDB(),
+    upsertCustomersToDB(newOrders),
   ])
 
   return {

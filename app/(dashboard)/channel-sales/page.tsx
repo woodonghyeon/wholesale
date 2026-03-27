@@ -10,6 +10,7 @@ import { formatMoney } from '@/lib/utils/format'
 
 const COLORS = ['bg-blue-500', 'bg-violet-500', 'bg-green-500', 'bg-orange-500', 'bg-pink-500', 'bg-teal-500']
 const TEXT_COLORS = ['text-blue-600', 'text-violet-600', 'text-green-600', 'text-orange-600', 'text-pink-600', 'text-teal-600']
+const BAR_COLORS = ['bg-blue-400', 'bg-violet-400', 'bg-green-400', 'bg-orange-400', 'bg-pink-400', 'bg-teal-400']
 
 const STATUS_LABEL: Record<string, { label: string; color: string }> = {
   PURCHASE_DECIDED: { label: '구매확정', color: 'bg-green-100 text-green-700' },
@@ -20,6 +21,32 @@ const STATUS_LABEL: Record<string, { label: string; color: string }> = {
   CANCEL_REQUEST:   { label: '취소요청', color: 'bg-red-100 text-red-600' },
   RETURNED:         { label: '반품',     color: 'bg-orange-100 text-orange-600' },
   RETURN_REQUEST:   { label: '반품요청', color: 'bg-orange-100 text-orange-600' },
+}
+
+// ── 택배사 코드 → 이름 + 추적 URL ────────────────────────────────
+const CARRIER_INFO: Record<string, { name: string; url: (n: string) => string }> = {
+  CJLGST: { name: 'CJ대한통운', url: n => `https://trace.cjlogistics.com/next/tracking.html?wblNo=${n}` },
+  CJ:     { name: 'CJ대한통운', url: n => `https://trace.cjlogistics.com/next/tracking.html?wblNo=${n}` },
+  HANJIN: { name: '한진택배',   url: n => `https://www.hanjin.com/kor/CMS/DeliveryMgr/WaybillResult.do?mCode=MN038&schLang=KOR&wblnumText2=${n}` },
+  LTCGIS: { name: '롯데택배',   url: n => `https://www.lotteglogis.com/home/reservation/tracking/index?InvNo=${n}` },
+  LOTTE:  { name: '롯데택배',   url: n => `https://www.lotteglogis.com/home/reservation/tracking/index?InvNo=${n}` },
+  EPOST:  { name: '우체국',     url: n => `https://service.epost.go.kr/trace.RetrieveEmsRigiTraceList.retrieve?POST_CODE=${n}` },
+  LOGEN:  { name: '로젠택배',   url: n => `http://www.ilogen.com/m/personal/trace/${n}` },
+  HDEXP:  { name: '현대택배',   url: n => `https://hyundaitransco.com/delivery/tracking?trackingNo=${n}` },
+  KDEXP:  { name: '경동택배',   url: n => `https://kdexp.com/newDeliverySearch.ekd?barcode=${n}` },
+  CHUNIL: { name: '천일택배',   url: n => `https://www.chunil.co.kr/HTrace/HTrace.jsp?transNo=${n}` },
+  DONGBU: { name: '한덱스',     url: n => `https://www.handex.co.kr/tracking?invoiceno=${n}` },
+}
+
+function getTrackingUrl(company: string, trackingNo: string): string {
+  const info = CARRIER_INFO[company?.toUpperCase?.() ?? '']
+  if (info) return info.url(trackingNo)
+  // 범용 폴백: 네이버 검색
+  return `https://search.naver.com/search.naver?query=${encodeURIComponent(trackingNo)}`
+}
+
+function getCarrierName(company: string): string {
+  return CARRIER_INFO[company?.toUpperCase?.() ?? '']?.name ?? company
 }
 
 function getPeriod(range: string): { from: string; to: string } {
@@ -64,7 +91,29 @@ interface NaverOrder {
   paymentMeans: string
 }
 
+interface NaverAnalytics {
+  days: number
+  totalOrders: number
+  activeOrders: number
+  settlement: {
+    totalRevenue: number
+    totalSettlement: number
+    totalPayComm: number
+    totalSaleComm: number
+    totalCommission: number
+    totalDiscount: number
+    settlementRate: number
+    commissionRate: number
+  }
+  topOptions: { option: string; count: number; revenue: number; orders: number }[]
+  inflowStats: { path: string; count: number; revenue: number; avgAmount: number; share: number }[]
+  paymentStats: { means: string; count: number; revenue: number; share: number }[]
+  membershipCount: number
+  membershipRate: number
+}
+
 const PAGE_SIZE_OPTIONS = [20, 50, 100]
+type AnalyticsTab = 'settlement' | 'options' | 'inflow' | 'payment'
 
 export default function ChannelSalesPage() {
   const [businesses, setBusinesses] = useState<Business[]>([])
@@ -84,6 +133,13 @@ export default function ChannelSalesPage() {
   const [orderDays, setOrderDays] = useState(30)
   const [orderPage, setOrderPage] = useState(1)
   const [orderPageSize, setOrderPageSize] = useState(50)
+
+  // 분석 탭
+  const [analytics, setAnalytics] = useState<NaverAnalytics | null>(null)
+  const [analyticsLoading, setAnalyticsLoading] = useState(false)
+  const [analyticsTab, setAnalyticsTab] = useState<AnalyticsTab>('settlement')
+  const [analyticsDays, setAnalyticsDays] = useState(30)
+  const [showAnalytics, setShowAnalytics] = useState(false)
 
   useEffect(() => { getBusinesses().then(setBusinesses) }, [])
 
@@ -122,10 +178,26 @@ export default function ChannelSalesPage() {
     finally { setOrdersLoading(false) }
   }, [orderDays])
 
+  const loadAnalytics = useCallback(async () => {
+    setAnalyticsLoading(true)
+    try {
+      const res = await fetch(`/api/naver/analytics?days=${analyticsDays}`)
+      const data = await res.json()
+      if (data.success) setAnalytics(data)
+    } catch { /* 무시 */ }
+    finally { setAnalyticsLoading(false) }
+  }, [analyticsDays])
+
   useEffect(() => { load() }, [load])
   useEffect(() => { loadNaver() }, [loadNaver])
   useEffect(() => { loadOrders() }, [loadOrders])
   useEffect(() => { setOrderPage(1) }, [orderSearch, orderStatusFilter, orderDays, orderPageSize])
+
+  // 분석 탭 열릴 때 최초 1회 로드
+  useEffect(() => {
+    if (showAnalytics && !analytics) loadAnalytics()
+  }, [showAnalytics, analytics, loadAnalytics])
+  useEffect(() => { if (showAnalytics) loadAnalytics() }, [analyticsDays]) // eslint-disable-line
 
   const filteredOrders = useMemo(() => {
     return allOrders.filter(o => {
@@ -146,9 +218,9 @@ export default function ChannelSalesPage() {
   const orderSummary = useMemo(() => {
     const active = filteredOrders.filter(o => !['CANCELED', 'CANCEL_REQUEST', 'RETURNED', 'RETURN_REQUEST'].includes(o.productOrderStatus))
     return {
-      totalRevenue: active.reduce((s, o) => s + o.totalPaymentAmount, 0),
+      totalRevenue:    active.reduce((s, o) => s + o.totalPaymentAmount, 0),
       totalSettlement: active.reduce((s, o) => s + (o.expectedSettlementAmount ?? 0), 0),
-      withTracking: filteredOrders.filter(o => !!o.trackingNumber).length,
+      withTracking:    filteredOrders.filter(o => !!o.trackingNumber).length,
     }
   }, [filteredOrders])
 
@@ -326,7 +398,6 @@ export default function ChannelSalesPage() {
           </div>
         ) : (
           <div className="space-y-5">
-            {/* 요약 카드 */}
             <div className="grid grid-cols-3 gap-4">
               <div className="bg-white border border-gray-100 rounded-2xl p-5">
                 <p className="text-xs text-gray-500 mb-1">총 매출</p>
@@ -346,7 +417,6 @@ export default function ChannelSalesPage() {
             </div>
 
             <div className="grid grid-cols-2 gap-5">
-              {/* 채널별 막대 비교 */}
               <div className="bg-white rounded-2xl border border-gray-100 p-5">
                 <p className="text-sm font-semibold text-gray-800 mb-4">채널별 매출 비교</p>
                 <div className="space-y-4">
@@ -375,7 +445,6 @@ export default function ChannelSalesPage() {
                 </div>
               </div>
 
-              {/* 수수료 상세 테이블 */}
               <div className="bg-white rounded-2xl border border-gray-100 overflow-hidden">
                 <div className="px-5 py-4 border-b border-gray-50">
                   <p className="text-sm font-semibold text-gray-800">수수료 차감 순매출</p>
@@ -409,7 +478,6 @@ export default function ChannelSalesPage() {
               </div>
             </div>
 
-            {/* 월별 채널 추이 */}
             {monthly.months.length > 1 && (
               <div className="bg-white rounded-2xl border border-gray-100 p-5">
                 <p className="text-sm font-semibold text-gray-800 mb-4">채널별 월간 추이</p>
@@ -488,9 +556,9 @@ export default function ChannelSalesPage() {
         {/* 툴바 */}
         <div className="flex flex-wrap gap-2 mb-3 items-center">
           <input
-            placeholder="상품명·주문자·주문번호 검색"
+            placeholder="상품명·주문자·주문번호·운송장 검색"
             value={orderSearch} onChange={e => setOrderSearch(e.target.value)}
-            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 w-56"
+            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 w-64"
           />
           <select value={orderStatusFilter} onChange={e => setOrderStatusFilter(e.target.value)}
             className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500">
@@ -532,7 +600,7 @@ export default function ChannelSalesPage() {
               </p>
             </div>
             <div className="bg-sky-50 border border-sky-100 rounded-xl px-4 py-3">
-              <p className="text-xs text-sky-600 mb-0.5">배송추적 가능</p>
+              <p className="text-xs text-sky-600 mb-0.5">배송 추적 가능</p>
               <p className="text-lg font-bold text-sky-700">{orderSummary.withTracking}건</p>
             </div>
           </div>
@@ -558,6 +626,8 @@ export default function ChannelSalesPage() {
                   const date = (o.paymentDate ?? o.orderDate ?? '')
                   const hasTracking = !!o.trackingNumber
                   const settlement = o.expectedSettlementAmount ?? 0
+                  const trackUrl = hasTracking ? getTrackingUrl(o.deliveryCompany, o.trackingNumber) : ''
+                  const carrierName = hasTracking ? getCarrierName(o.deliveryCompany) : ''
                   return (
                     <tr key={o.productOrderId} className="hover:bg-gray-50">
                       <td className="px-3 py-2.5 text-xs text-gray-500 font-mono whitespace-nowrap">{date.slice(0, 10)}</td>
@@ -595,8 +665,16 @@ export default function ChannelSalesPage() {
                       <td className="px-3 py-2.5 text-xs">
                         {hasTracking ? (
                           <div>
-                            <div className="text-gray-600 font-mono text-xs">{o.trackingNumber}</div>
-                            <div className="text-gray-400 text-xs">{o.deliveryCompany}</div>
+                            <a
+                              href={trackUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="font-mono text-xs text-blue-600 hover:text-blue-800 hover:underline"
+                              title={`${carrierName} 배송 조회`}
+                            >
+                              {o.trackingNumber}
+                            </a>
+                            <div className="text-gray-400 text-xs mt-0.5">{carrierName || o.deliveryCompany}</div>
                           </div>
                         ) : <span className="text-gray-300">—</span>}
                       </td>
@@ -635,6 +713,213 @@ export default function ChannelSalesPage() {
                 다음 ›
               </button>
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── 네이버 판매 분석 (정산·옵션·유입·결제수단) ───────── */}
+      <div className="border-t border-gray-100 pt-6 mt-4">
+        <button
+          onClick={() => setShowAnalytics(v => !v)}
+          className="flex items-center gap-2 w-full text-left group"
+        >
+          <div className="w-6 h-6 bg-green-500 rounded-md flex items-center justify-center text-white text-xs font-bold">N</div>
+          <p className="text-sm font-semibold text-gray-800">네이버 판매 분석</p>
+          <span className="text-xs text-gray-400">(정산·옵션·유입경로·결제수단)</span>
+          <span className="ml-auto text-gray-400 text-sm">{showAnalytics ? '▲' : '▼'}</span>
+        </button>
+
+        {showAnalytics && (
+          <div className="mt-4">
+            {/* 분석 기간 + 탭 */}
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex border border-gray-200 rounded-lg overflow-hidden text-xs">
+                {(['settlement', 'options', 'inflow', 'payment'] as AnalyticsTab[]).map(tab => {
+                  const labels: Record<AnalyticsTab, string> = {
+                    settlement: '정산 분석',
+                    options:    '옵션 분석',
+                    inflow:     '유입 경로',
+                    payment:    '결제 수단',
+                  }
+                  return (
+                    <button key={tab} onClick={() => setAnalyticsTab(tab)}
+                      className={`px-4 py-2 font-medium transition-colors ${analyticsTab === tab ? 'bg-green-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                      {labels[tab]}
+                    </button>
+                  )
+                })}
+              </div>
+              <select value={analyticsDays} onChange={e => setAnalyticsDays(Number(e.target.value))}
+                className="border border-gray-200 rounded-lg px-3 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-green-500">
+                <option value={7}>최근 7일</option>
+                <option value={30}>최근 30일</option>
+                <option value={60}>최근 60일</option>
+                <option value={90}>최근 90일</option>
+              </select>
+              <button onClick={loadAnalytics} className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 rounded px-2 py-1.5">
+                ↺ 새로고침
+              </button>
+            </div>
+
+            {analyticsLoading ? (
+              <div className="py-12 text-center text-sm text-gray-400 bg-white rounded-xl border border-gray-100">분석 데이터 불러오는 중...</div>
+            ) : !analytics ? (
+              <div className="py-12 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">데이터를 불러올 수 없습니다</div>
+            ) : (
+              <div>
+                {/* ── 정산 분석 탭 ── */}
+                {analyticsTab === 'settlement' && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-4 gap-3">
+                      <div className="bg-green-50 border border-green-100 rounded-xl p-4">
+                        <p className="text-xs text-green-600 mb-1">총 결제금액</p>
+                        <p className="text-xl font-bold text-green-700">{Math.round(analytics.settlement.totalRevenue / 10000).toLocaleString()}<span className="text-sm font-normal ml-1">만원</span></p>
+                        <p className="text-xs text-green-500 mt-1">{analytics.activeOrders}건</p>
+                      </div>
+                      <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
+                        <p className="text-xs text-indigo-600 mb-1">정산 예정금</p>
+                        <p className="text-xl font-bold text-indigo-700">{Math.round(analytics.settlement.totalSettlement / 10000).toLocaleString()}<span className="text-sm font-normal ml-1">만원</span></p>
+                        <p className="text-xs text-indigo-500 mt-1">정산률 {analytics.settlement.settlementRate}%</p>
+                      </div>
+                      <div className="bg-red-50 border border-red-100 rounded-xl p-4">
+                        <p className="text-xs text-red-500 mb-1">총 수수료</p>
+                        <p className="text-xl font-bold text-red-600">{Math.round(analytics.settlement.totalCommission / 10000).toLocaleString()}<span className="text-sm font-normal ml-1">만원</span></p>
+                        <p className="text-xs text-red-400 mt-1">수수료율 {analytics.settlement.commissionRate}%</p>
+                      </div>
+                      <div className="bg-orange-50 border border-orange-100 rounded-xl p-4">
+                        <p className="text-xs text-orange-500 mb-1">총 할인금액</p>
+                        <p className="text-xl font-bold text-orange-600">{Math.round(analytics.settlement.totalDiscount / 10000).toLocaleString()}<span className="text-sm font-normal ml-1">만원</span></p>
+                        <p className="text-xs text-orange-400 mt-1">쿠폰·포인트 포함</p>
+                      </div>
+                    </div>
+
+                    {/* 정산 구조 바 */}
+                    <div className="bg-white border border-gray-100 rounded-xl p-5">
+                      <p className="text-xs font-medium text-gray-600 mb-4">정산 구조 분석</p>
+                      <div className="space-y-3">
+                        {[
+                          { label: '정산 예정금', amount: analytics.settlement.totalSettlement, color: 'bg-indigo-400', pct: analytics.settlement.settlementRate },
+                          { label: '결제 수수료', amount: analytics.settlement.totalPayComm, color: 'bg-red-300', pct: analytics.settlement.totalRevenue > 0 ? Math.round(analytics.settlement.totalPayComm / analytics.settlement.totalRevenue * 100) : 0 },
+                          { label: '판매 수수료', amount: analytics.settlement.totalSaleComm, color: 'bg-orange-300', pct: analytics.settlement.totalRevenue > 0 ? Math.round(analytics.settlement.totalSaleComm / analytics.settlement.totalRevenue * 100) : 0 },
+                        ].map(item => (
+                          <div key={item.label}>
+                            <div className="flex justify-between text-xs mb-1">
+                              <span className="text-gray-600">{item.label}</span>
+                              <span className="font-medium">{item.amount.toLocaleString()}원 <span className="text-gray-400">({item.pct}%)</span></span>
+                            </div>
+                            <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                              <div className={`h-2 ${item.color} rounded-full`} style={{ width: `${item.pct}%` }} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── 옵션 분석 탭 ── */}
+                {analyticsTab === 'options' && (
+                  <div className="bg-white border border-gray-100 rounded-xl p-5">
+                    <p className="text-xs font-medium text-gray-600 mb-4">인기 상품 옵션 TOP {analytics.topOptions.length}</p>
+                    {analytics.topOptions.length === 0 ? (
+                      <p className="text-sm text-gray-400 text-center py-8">옵션 데이터가 없습니다</p>
+                    ) : (
+                      <div className="space-y-2.5">
+                        {analytics.topOptions.map((opt, i) => {
+                          const maxCount = analytics.topOptions[0].count
+                          const pct = maxCount > 0 ? (opt.count / maxCount) * 100 : 0
+                          return (
+                            <div key={opt.option}>
+                              <div className="flex justify-between text-xs mb-1">
+                                <span className="text-gray-700 truncate max-w-[300px]" title={opt.option}>
+                                  <span className="text-gray-400 mr-1.5 font-mono">{String(i + 1).padStart(2, '0')}</span>
+                                  {opt.option}
+                                </span>
+                                <div className="flex gap-3 text-gray-500 shrink-0 ml-2">
+                                  <span>{opt.count}개</span>
+                                  <span className="text-green-600 font-medium">{opt.revenue.toLocaleString()}원</span>
+                                </div>
+                              </div>
+                              <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                <div className={`h-1.5 ${BAR_COLORS[i % BAR_COLORS.length]} rounded-full`} style={{ width: `${pct}%` }} />
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── 유입 경로 탭 ── */}
+                {analyticsTab === 'inflow' && (
+                  <div className="bg-white border border-gray-100 rounded-xl p-5">
+                    <p className="text-xs font-medium text-gray-600 mb-4">유입 경로별 주문 현황</p>
+                    {analytics.inflowStats.length === 0 ? (
+                      <p className="text-sm text-gray-400 text-center py-8">유입 경로 데이터가 없습니다</p>
+                    ) : (
+                      <div className="space-y-2.5">
+                        {analytics.inflowStats.map((item, i) => (
+                          <div key={item.path}>
+                            <div className="flex justify-between text-xs mb-1">
+                              <span className="text-gray-700 truncate max-w-[220px]">{item.path || '알수없음'}</span>
+                              <div className="flex gap-3 text-gray-500 shrink-0 ml-2">
+                                <span>{item.count}건 ({item.share}%)</span>
+                                <span className="text-gray-400">평균 {item.avgAmount.toLocaleString()}원</span>
+                              </div>
+                            </div>
+                            <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                              <div className={`h-1.5 ${BAR_COLORS[i % BAR_COLORS.length]} rounded-full`} style={{ width: `${item.share}%` }} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── 결제 수단 탭 ── */}
+                {analyticsTab === 'payment' && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                      {/* 결제수단 바 */}
+                      <div className="bg-white border border-gray-100 rounded-xl p-5">
+                        <p className="text-xs font-medium text-gray-600 mb-4">결제 수단별 주문 비중</p>
+                        {analytics.paymentStats.length === 0 ? (
+                          <p className="text-sm text-gray-400 text-center py-6">데이터 없음</p>
+                        ) : (
+                          <div className="space-y-2.5">
+                            {analytics.paymentStats.map((item, i) => (
+                              <div key={item.means}>
+                                <div className="flex justify-between text-xs mb-1">
+                                  <span className="text-gray-700">{item.means}</span>
+                                  <span className="text-gray-500">{item.count}건 ({item.share}%)</span>
+                                </div>
+                                <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                  <div className={`h-1.5 ${BAR_COLORS[i % BAR_COLORS.length]} rounded-full`} style={{ width: `${item.share}%` }} />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      {/* 멤버십 */}
+                      <div className="bg-white border border-gray-100 rounded-xl p-5">
+                        <p className="text-xs font-medium text-gray-600 mb-4">네이버플러스 멤버십</p>
+                        <div className="flex flex-col items-center justify-center h-32 gap-2">
+                          <p className="text-4xl font-bold text-green-600">{analytics.membershipRate}%</p>
+                          <p className="text-xs text-gray-400">{analytics.membershipCount}명 / {analytics.activeOrders}명</p>
+                          <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden mt-2">
+                            <div className="h-2 bg-green-400 rounded-full" style={{ width: `${analytics.membershipRate}%` }} />
+                          </div>
+                          <p className="text-xs text-gray-400">멤버십 회원 구매 비율</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
