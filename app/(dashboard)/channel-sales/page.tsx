@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { toast } from 'sonner'
 import PageHeader from '@/components/ui/PageHeader'
 import { getBusinesses } from '@/lib/supabase/businesses'
@@ -40,6 +40,22 @@ interface NaverStats {
   recentOrders: { productOrderId: string; productName: string; ordererName: string; totalPaymentAmount: number; status: string; orderDate: string }[]
 }
 
+interface NaverOrder {
+  productOrderId: string
+  orderId: string
+  orderDate: string
+  paymentDate: string
+  productOrderStatus: string
+  productName: string
+  quantity: number
+  unitPrice: number
+  totalPaymentAmount: number
+  ordererName: string
+  ordererTel: string
+}
+
+const PAGE_SIZE_OPTIONS = [20, 50, 100]
+
 export default function ChannelSalesPage() {
   const [businesses, setBusinesses] = useState<Business[]>([])
   const [bizFilter, setBizFilter] = useState('all')
@@ -49,6 +65,15 @@ export default function ChannelSalesPage() {
   const [loading, setLoading] = useState(true)
   const [naverStats, setNaverStats] = useState<NaverStats | null>(null)
   const [naverLoading, setNaverLoading] = useState(true)
+
+  // 주문 상세 목록
+  const [allOrders, setAllOrders] = useState<NaverOrder[]>([])
+  const [ordersLoading, setOrdersLoading] = useState(true)
+  const [orderSearch, setOrderSearch] = useState('')
+  const [orderStatusFilter, setOrderStatusFilter] = useState('all')
+  const [orderDays, setOrderDays] = useState(30)
+  const [orderPage, setOrderPage] = useState(1)
+  const [orderPageSize, setOrderPageSize] = useState(50)
 
   useEffect(() => { getBusinesses().then(setBusinesses) }, [])
 
@@ -77,8 +102,50 @@ export default function ChannelSalesPage() {
     finally { setNaverLoading(false) }
   }, [])
 
+  const loadOrders = useCallback(async () => {
+    setOrdersLoading(true)
+    try {
+      const res = await fetch(`/api/naver/orders?days=${orderDays}`)
+      const data = await res.json()
+      if (data.success) setAllOrders(data.orders ?? [])
+    } catch { /* 무시 */ }
+    finally { setOrdersLoading(false) }
+  }, [orderDays])
+
   useEffect(() => { load() }, [load])
   useEffect(() => { loadNaver() }, [loadNaver])
+  useEffect(() => { loadOrders() }, [loadOrders])
+  useEffect(() => { setOrderPage(1) }, [orderSearch, orderStatusFilter, orderDays, orderPageSize])
+
+  const filteredOrders = useMemo(() => {
+    return allOrders.filter(o => {
+      const matchStatus = orderStatusFilter === 'all' || o.productOrderStatus === orderStatusFilter
+      const q = orderSearch.toLowerCase()
+      const matchSearch = !q || o.productName.toLowerCase().includes(q) || o.ordererName.toLowerCase().includes(q) || o.productOrderId.includes(q)
+      return matchStatus && matchSearch
+    }).sort((a, b) => {
+      const da = (a.paymentDate ?? a.orderDate) || ''
+      const db = (b.paymentDate ?? b.orderDate) || ''
+      return db.localeCompare(da)
+    })
+  }, [allOrders, orderSearch, orderStatusFilter])
+
+  const orderTotalPages = Math.max(1, Math.ceil(filteredOrders.length / orderPageSize))
+  const paginatedOrders = filteredOrders.slice((orderPage - 1) * orderPageSize, orderPage * orderPageSize)
+
+  const orderPageNumbers = useMemo(() => {
+    const pages: (number | '...')[] = []
+    if (orderTotalPages <= 7) {
+      for (let i = 1; i <= orderTotalPages; i++) pages.push(i)
+    } else {
+      pages.push(1)
+      if (orderPage > 3) pages.push('...')
+      for (let i = Math.max(2, orderPage - 1); i <= Math.min(orderTotalPages - 1, orderPage + 1); i++) pages.push(i)
+      if (orderPage < orderTotalPages - 2) pages.push('...')
+      pages.push(orderTotalPages)
+    }
+    return pages
+  }, [orderPage, orderTotalPages])
 
   const totalSales = channels.reduce((s, c) => s + c.total_sales, 0)
   const totalNet = channels.reduce((s, c) => s + c.net_sales, 0)
@@ -386,6 +453,116 @@ export default function ChannelSalesPage() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+      </div>
+
+      {/* ── 네이버 주문 상세 목록 ─────────────────────────────── */}
+      <div className="border-t border-gray-100 pt-6 mt-2">
+        <div className="flex items-center gap-2 mb-4">
+          <div className="w-6 h-6 bg-green-500 rounded-md flex items-center justify-center text-white text-xs font-bold">N</div>
+          <p className="text-sm font-semibold text-gray-800">네이버 주문 상세 목록</p>
+          <span className="text-xs text-gray-400">({filteredOrders.length}건)</span>
+          <button onClick={loadOrders} className="ml-auto text-xs text-gray-400 hover:text-gray-600 border border-gray-200 rounded px-2 py-0.5">↺ 새로고침</button>
+        </div>
+
+        {/* 툴바 */}
+        <div className="flex flex-wrap gap-2 mb-3 items-center">
+          <input
+            placeholder="상품명·주문자·주문번호 검색"
+            value={orderSearch} onChange={e => setOrderSearch(e.target.value)}
+            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 w-56"
+          />
+          <select value={orderStatusFilter} onChange={e => setOrderStatusFilter(e.target.value)}
+            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500">
+            <option value="all">전체 상태</option>
+            {Object.entries(STATUS_LABEL).map(([v, { label }]) => <option key={v} value={v}>{label}</option>)}
+          </select>
+          <select value={orderDays} onChange={e => setOrderDays(Number(e.target.value))}
+            className="border border-gray-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-green-500">
+            <option value={7}>최근 7일</option>
+            <option value={30}>최근 30일</option>
+            <option value={60}>최근 60일</option>
+            <option value={90}>최근 90일</option>
+          </select>
+
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-xs text-gray-400">페이지당</span>
+            <div className="flex border border-gray-200 rounded-lg overflow-hidden">
+              {PAGE_SIZE_OPTIONS.map(n => (
+                <button key={n} onClick={() => setOrderPageSize(n)}
+                  className={`px-3 py-1.5 text-xs font-medium transition-colors ${orderPageSize === n ? 'bg-green-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}>
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+          {ordersLoading ? (
+            <div className="py-12 text-center text-sm text-gray-400">불러오는 중...</div>
+          ) : filteredOrders.length === 0 ? (
+            <div className="py-12 text-center text-sm text-gray-400">주문 내역이 없습니다</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-gray-500 text-xs">
+                <tr>
+                  {['주문일', '주문번호', '상품명', '수량', '단가', '결제금액', '주문자', '상태'].map(h => (
+                    <th key={h} className="px-4 py-3 text-left font-medium">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {paginatedOrders.map(o => {
+                  const st = STATUS_LABEL[o.productOrderStatus] ?? { label: o.productOrderStatus, color: 'bg-gray-100 text-gray-500' }
+                  const date = (o.paymentDate ?? o.orderDate ?? '')
+                  return (
+                    <tr key={o.productOrderId} className="hover:bg-gray-50">
+                      <td className="px-4 py-2.5 text-xs text-gray-500 font-mono whitespace-nowrap">{date.slice(0, 10)}</td>
+                      <td className="px-4 py-2.5 text-xs text-gray-400 font-mono">{o.productOrderId}</td>
+                      <td className="px-4 py-2.5 font-medium text-gray-800 max-w-[220px]">
+                        <span className="line-clamp-1" title={o.productName}>{o.productName}</span>
+                      </td>
+                      <td className="px-4 py-2.5 text-center text-gray-600">{o.quantity}</td>
+                      <td className="px-4 py-2.5 text-gray-500">{o.unitPrice.toLocaleString()}원</td>
+                      <td className="px-4 py-2.5 font-semibold text-green-600">{o.totalPaymentAmount.toLocaleString()}원</td>
+                      <td className="px-4 py-2.5 text-gray-600">{o.ordererName}</td>
+                      <td className="px-4 py-2.5">
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${st.color}`}>{st.label}</span>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        {/* 페이지네이션 */}
+        {orderTotalPages > 1 && (
+          <div className="flex items-center justify-between mt-3">
+            <p className="text-xs text-gray-400">
+              {((orderPage - 1) * orderPageSize) + 1}–{Math.min(orderPage * orderPageSize, filteredOrders.length)} / 총 {filteredOrders.length}건
+            </p>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setOrderPage(p => Math.max(1, p - 1))} disabled={orderPage === 1}
+                className="px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg disabled:opacity-30 hover:bg-gray-50">
+                ‹ 이전
+              </button>
+              {orderPageNumbers.map((n, i) =>
+                n === '...'
+                  ? <span key={`d${i}`} className="px-1 text-gray-400 text-xs">…</span>
+                  : <button key={n} onClick={() => setOrderPage(n as number)}
+                      className={`w-8 h-7 text-xs rounded-lg transition-colors ${orderPage === n ? 'bg-green-600 text-white font-medium' : 'border border-gray-200 hover:bg-gray-50 text-gray-600'}`}>
+                      {n}
+                    </button>
+              )}
+              <button onClick={() => setOrderPage(p => Math.min(orderTotalPages, p + 1))} disabled={orderPage === orderTotalPages}
+                className="px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg disabled:opacity-30 hover:bg-gray-50">
+                다음 ›
+              </button>
+            </div>
           </div>
         )}
       </div>

@@ -57,6 +57,9 @@ export async function POST(req: NextRequest) {
         ? order.paymentDate.slice(0, 10)
         : order.orderDate.slice(0, 10)
 
+      const supplyAmount = Math.round(order.totalPaymentAmount / 1.1)
+      const taxAmount = order.totalPaymentAmount - supplyAmount
+
       const { data: slip, error: slipErr } = await supabase
         .from('slips')
         .insert({
@@ -64,9 +67,13 @@ export async function POST(req: NextRequest) {
           business_id: businessId,
           channel_id: naverChannel?.id ?? null,
           slip_date: slipDate,
+          payment_type: 'cash',
+          cash_amount: order.totalPaymentAmount,
+          supply_amount: supplyAmount,
+          tax_amount: taxAmount,
           total_amount: order.totalPaymentAmount,
+          is_tax_invoice: false,
           memo: memoKey,
-          status: 'confirmed',
         })
         .select('id')
         .single()
@@ -76,13 +83,14 @@ export async function POST(req: NextRequest) {
         continue
       }
 
-      // 슬립 아이템 생성 (상품명으로만 저장)
+      const itemSupply = Math.round(order.unitPrice * order.quantity / 1.1)
       await supabase.from('slip_items').insert({
         slip_id: slip.id,
-        product_name_override: order.productName,
+        product_name: order.productName,
         quantity: order.quantity,
-        unit_price: order.unitPrice,
-        amount: order.totalPaymentAmount,
+        unit_price: Math.round(order.unitPrice / 1.1),
+        supply_amount: itemSupply,
+        tax_amount: (order.unitPrice * order.quantity) - itemSupply,
         sort_order: 0,
       })
 
