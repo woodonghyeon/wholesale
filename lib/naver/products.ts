@@ -16,7 +16,7 @@ export interface NaverProduct {
   orderCount?: number
 }
 
-/** 상품 API로 전체 상품 목록 페이지네이션 조회 */
+/** 상품 API로 전체 상품 목록 페이지네이션 조회 (POST 방식) */
 async function fetchAllProductsFromAPI(): Promise<NaverProduct[]> {
   const headers = await getNaverAuthHeaders()
   const all: NaverProduct[] = []
@@ -24,15 +24,17 @@ async function fetchAllProductsFromAPI(): Promise<NaverProduct[]> {
   let page = 1
 
   while (true) {
-    const params = new URLSearchParams({
-      productStatusType: 'SALE',
-      page: String(page),
-      size: String(PAGE_SIZE),
-    })
-
     const res = await fetch(
-      `${BASE_URL}/external/v1/products/search?${params}`,
-      { headers }
+      `${BASE_URL}/external/v1/products/search`,
+      {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productStatusType: 'SALE',
+          page,
+          size: PAGE_SIZE,
+        }),
+      }
     )
 
     if (!res.ok) {
@@ -41,11 +43,35 @@ async function fetchAllProductsFromAPI(): Promise<NaverProduct[]> {
     }
 
     const data = await res.json()
-    const contents: NaverProduct[] = data.contents ?? data.simpleProducts ?? []
-    all.push(...contents)
 
-    const total: number = data.totalElements ?? data.totalCount ?? contents.length
-    if (all.length >= total || contents.length < PAGE_SIZE) break
+    // 응답 구조: { contents: [{ originProductNo, channelProducts: [...] }], totalElements }
+    const rawItems: Array<{
+      originProductNo: number
+      channelProducts: Array<{
+        name: string
+        salePrice: number
+        stockQuantity: number
+        statusType: string
+        wholeCategoryName?: string
+      }>
+    }> = data.contents ?? []
+
+    const mapped: NaverProduct[] = rawItems.map(item => {
+      const ch = item.channelProducts?.[0]
+      return {
+        originProductNo: String(item.originProductNo),
+        name: ch?.name ?? '',
+        salePrice: ch?.salePrice ?? 0,
+        stockQuantity: ch?.stockQuantity ?? 0,
+        statusType: ch?.statusType ?? 'SALE',
+        categoryName: ch?.wholeCategoryName?.split('>')?.[2]?.trim() ?? '',
+      }
+    })
+
+    all.push(...mapped)
+
+    const total: number = data.totalElements ?? 0
+    if (all.length >= total || rawItems.length < PAGE_SIZE) break
     page++
   }
 

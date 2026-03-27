@@ -17,13 +17,20 @@ function adminClient() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}))
-    const businessId: string | undefined = body.business_id
-
-    if (!businessId) {
-      return NextResponse.json({ success: false, error: 'business_id 필수' }, { status: 400 })
-    }
-
     const supabase = adminClient()
+
+    // business_id 미제공 시 DB에서 첫 번째 사업자 자동 사용
+    let businessId: string = body.business_id
+    if (!businessId) {
+      const { data: biz } = await supabase
+        .from('businesses')
+        .select('id')
+        .order('created_at')
+        .limit(1)
+        .single()
+      if (!biz?.id) return NextResponse.json({ success: false, error: '사업자 없음' }, { status: 400 })
+      businessId = biz.id
+    }
 
     // 1. 네이버 상품 조회 (GET만 사용)
     const naverProducts = await getNaverProducts()
