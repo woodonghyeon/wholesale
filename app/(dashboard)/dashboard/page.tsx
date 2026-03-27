@@ -58,6 +58,16 @@ const STATUS_LABEL: Record<string, { label: string; color: string }> = {
   RETURN_REQUEST: { label: '반품요청', color: 'bg-orange-100 text-orange-600' },
 }
 
+interface StockVelocityItem {
+  name: string
+  currentStock: number
+  minStock: number
+  dailySales: number
+  daysLeft: number | null
+  reorderQty: number
+  urgent: boolean
+}
+
 export default function DashboardPage() {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [businesses, setBusinesses] = useState<Business[]>([])
@@ -65,13 +75,23 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [naverStats, setNaverStats] = useState<NaverStats | null>(null)
   const [naverLoading, setNaverLoading] = useState(true)
+  const [urgentStocks, setUrgentStocks] = useState<StockVelocityItem[]>([])
 
   useEffect(() => {
     getBusinesses().then(setBusinesses).catch(() => {})
     loadNaverStats()
+    loadStockAlerts()
   }, [])
 
   useEffect(() => { load() }, [bizFilter])
+
+  async function loadStockAlerts() {
+    try {
+      const res = await fetch('/api/analytics/stock-velocity?days=30')
+      const data = await res.json()
+      if (data.success) setUrgentStocks((data.items ?? []).filter((i: StockVelocityItem) => i.urgent).slice(0, 5))
+    } catch { /* 무시 */ }
+  }
 
   async function loadNaverStats() {
     setNaverLoading(true)
@@ -94,6 +114,15 @@ export default function DashboardPage() {
   const maxTrend = stats ? Math.max(...stats.monthlySalesTrend.map(m => m.amount), 1) : 1
   const maxDaily = naverStats ? Math.max(...naverStats.daily.map(d => d.revenue), 1) : 1
 
+  // 네이버 이번달 매출 계산 (daily 데이터에서 이번달 날짜만 합산)
+  const thisMonthPrefix = new Date().toISOString().slice(0, 7) // "2026-03"
+  const naverMonthRevenue = naverStats
+    ? naverStats.daily.filter(d => d.date.startsWith(thisMonthPrefix)).reduce((s, d) => s + d.revenue, 0)
+    : 0
+  const naverMonthCount = naverStats
+    ? naverStats.daily.filter(d => d.date.startsWith(thisMonthPrefix)).reduce((s, d) => s + d.count, 0)
+    : 0
+
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
@@ -111,13 +140,26 @@ export default function DashboardPage() {
         <div className="space-y-6">
           {/* 이번달 요약 */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <StatCard label="이번달 매출" value={`${formatMoney(stats.monthSales)}원`} accent="blue" />
+            <div className="bg-white rounded-2xl border border-gray-100 p-5">
+              <p className="text-xs text-gray-500 mb-1">이번달 매출</p>
+              <p className="text-2xl font-bold text-blue-600">
+                {stats.monthSales > 0 ? `${formatMoney(stats.monthSales)}원` : `${formatMoney(naverMonthRevenue)}원`}
+              </p>
+              {naverMonthRevenue > 0 && stats.monthSales === 0 && (
+                <p className="text-xs text-green-500 mt-1">네이버 실시간 {naverMonthCount}건</p>
+              )}
+              {stats.monthSales > 0 && naverMonthRevenue > 0 && (
+                <p className="text-xs text-green-500 mt-1">네이버: {formatMoney(naverMonthRevenue)}원</p>
+              )}
+            </div>
             <StatCard label="이번달 매입" value={`${formatMoney(stats.monthPurchase)}원`} />
             <StatCard
               label="이번달 이익"
-              value={`${formatMoney(stats.monthProfit)}원`}
+              value={`${formatMoney(stats.monthProfit > 0 ? stats.monthProfit : naverMonthRevenue - stats.monthPurchase)}원`}
               accent={stats.monthProfit >= 0 ? 'green' : 'red'}
-              sub={stats.monthSales > 0 ? `마진율 ${Math.round((stats.monthProfit / stats.monthSales) * 100)}%` : undefined}
+              sub={naverMonthRevenue > 0 && stats.monthSales === 0
+                ? `네이버 기준 추정`
+                : stats.monthSales > 0 ? `마진율 ${Math.round((stats.monthProfit / stats.monthSales) * 100)}%` : undefined}
             />
             <StatCard label="재고 가치" value={`${formatMoney(stats.totalInventoryValue)}원`} />
           </div>
@@ -131,6 +173,38 @@ export default function DashboardPage() {
                 <span className="text-orange-600 ml-2 text-xs">안전재고 이하입니다 → 재고 관리로 이동</span>
               </div>
             </Link>
+          )}
+
+          {/* 소진 임박 재고 알림 */}
+          {urgentStocks.length > 0 && (
+            <div className="bg-red-50 border border-red-100 rounded-2xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-base">🚨</span>
+                  <p className="text-sm font-semibold text-red-700">소진 임박 재고 — 발주 필요</p>
+                </div>
+                <Link href="/inventory" className="text-xs text-red-500 hover:underline">전체 보기 →</Link>
+              </div>
+              <div className="grid grid-cols-1 gap-1.5">
+                {urgentStocks.map(item => (
+                  <div key={item.name} className="flex items-center justify-between bg-white rounded-lg px-3 py-2 text-xs">
+                    <span className="text-gray-700 font-medium truncate max-w-[200px]">{item.name}</span>
+                    <div className="flex items-center gap-3 shrink-0 ml-2">
+                      <span className="text-gray-400">현재 {item.currentStock}개</span>
+                      {item.daysLeft !== null
+                        ? <span className={`font-bold px-2 py-0.5 rounded-full ${item.daysLeft <= 3 ? 'bg-red-100 text-red-600' : 'bg-orange-100 text-orange-600'}`}>
+                            {item.daysLeft}일 후 소진
+                          </span>
+                        : <span className="bg-orange-100 text-orange-600 font-bold px-2 py-0.5 rounded-full">안전재고 이하</span>
+                      }
+                      {item.reorderQty > 0 && (
+                        <span className="text-blue-500">발주 추천 {item.reorderQty}개</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
 
           <div className="grid grid-cols-3 gap-6">

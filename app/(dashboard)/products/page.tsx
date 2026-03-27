@@ -119,12 +119,23 @@ export default function ProductsPage() {
         title="상품 관리"
         description={`총 ${filtered.length}개${filtered.length !== products.length ? ` (전체 ${products.length}개)` : ''}`}
         action={
-          <button
-            onClick={() => openEdit({ unit: 'ea', buy_price: 0, sell_price: 0, min_stock: 0, is_bundle: false })}
-            className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
-          >
-            + 상품 추가
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                const biz = bizFilter !== 'all' ? `&businessId=${bizFilter}` : ''
+                window.open(`/api/pdf/price-list?${biz}`, '_blank')
+              }}
+              className="px-4 py-2 bg-gray-100 text-gray-700 text-sm rounded-lg hover:bg-gray-200 border border-gray-200"
+            >
+              🖨️ 가격표 출력
+            </button>
+            <button
+              onClick={() => openEdit({ unit: 'ea', buy_price: 0, sell_price: 0, min_stock: 0, is_bundle: false })}
+              className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
+            >
+              + 상품 추가
+            </button>
+          </div>
         }
       />
 

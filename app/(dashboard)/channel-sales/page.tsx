@@ -112,8 +112,43 @@ interface NaverAnalytics {
   membershipRate: number
 }
 
+interface CustomerData {
+  summary: {
+    totalCustomers: number
+    repeatCount: number
+    repeatRate: number
+    vipCount: number
+    totalRevenue: number
+    repeatRevenue: number
+    repeatRevenueRate: number
+  }
+  customers: {
+    tel: string
+    name: string
+    orderCount: number
+    totalAmount: number
+    avgAmount: number
+    lastOrderDate: string
+    grade: string
+    topProducts: string[]
+  }[]
+}
+
+interface RegionData {
+  totalCount: number
+  totalRevenue: number
+  regions: {
+    region: string
+    count: number
+    revenue: number
+    avgAmount: number
+    countShare: number
+    revenueShare: number
+  }[]
+}
+
 const PAGE_SIZE_OPTIONS = [20, 50, 100]
-type AnalyticsTab = 'settlement' | 'options' | 'inflow' | 'payment'
+type AnalyticsTab = 'settlement' | 'options' | 'inflow' | 'payment' | 'customers' | 'regions'
 
 export default function ChannelSalesPage() {
   const [businesses, setBusinesses] = useState<Business[]>([])
@@ -140,6 +175,10 @@ export default function ChannelSalesPage() {
   const [analyticsTab, setAnalyticsTab] = useState<AnalyticsTab>('settlement')
   const [analyticsDays, setAnalyticsDays] = useState(30)
   const [showAnalytics, setShowAnalytics] = useState(false)
+  const [customerData, setCustomerData] = useState<CustomerData | null>(null)
+  const [customerLoading, setCustomerLoading] = useState(false)
+  const [regionData, setRegionData] = useState<RegionData | null>(null)
+  const [regionLoading, setRegionLoading] = useState(false)
 
   useEffect(() => { getBusinesses().then(setBusinesses) }, [])
 
@@ -188,6 +227,26 @@ export default function ChannelSalesPage() {
     finally { setAnalyticsLoading(false) }
   }, [analyticsDays])
 
+  const loadCustomers = useCallback(async () => {
+    setCustomerLoading(true)
+    try {
+      const res = await fetch(`/api/analytics/customers?days=${analyticsDays}`)
+      const data = await res.json()
+      if (data.success) setCustomerData(data)
+    } catch { /* 무시 */ }
+    finally { setCustomerLoading(false) }
+  }, [analyticsDays])
+
+  const loadRegions = useCallback(async () => {
+    setRegionLoading(true)
+    try {
+      const res = await fetch(`/api/analytics/regions?days=${analyticsDays}`)
+      const data = await res.json()
+      if (data.success) setRegionData(data)
+    } catch { /* 무시 */ }
+    finally { setRegionLoading(false) }
+  }, [analyticsDays])
+
   useEffect(() => { load() }, [load])
   useEffect(() => { loadNaver() }, [loadNaver])
   useEffect(() => { loadOrders() }, [loadOrders])
@@ -197,7 +256,18 @@ export default function ChannelSalesPage() {
   useEffect(() => {
     if (showAnalytics && !analytics) loadAnalytics()
   }, [showAnalytics, analytics, loadAnalytics])
-  useEffect(() => { if (showAnalytics) loadAnalytics() }, [analyticsDays]) // eslint-disable-line
+  useEffect(() => {
+    if (!showAnalytics) return
+    loadAnalytics()
+    if (analyticsTab === 'customers') loadCustomers()
+    if (analyticsTab === 'regions') loadRegions()
+  }, [analyticsDays]) // eslint-disable-line
+
+  useEffect(() => {
+    if (!showAnalytics) return
+    if (analyticsTab === 'customers' && !customerData) loadCustomers()
+    if (analyticsTab === 'regions' && !regionData) loadRegions()
+  }, [analyticsTab, showAnalytics]) // eslint-disable-line
 
   const filteredOrders = useMemo(() => {
     return allOrders.filter(o => {
@@ -734,12 +804,14 @@ export default function ChannelSalesPage() {
             {/* 분석 기간 + 탭 */}
             <div className="flex items-center gap-3 mb-4">
               <div className="flex border border-gray-200 rounded-lg overflow-hidden text-xs">
-                {(['settlement', 'options', 'inflow', 'payment'] as AnalyticsTab[]).map(tab => {
+                {(['settlement', 'options', 'inflow', 'payment', 'customers', 'regions'] as AnalyticsTab[]).map(tab => {
                   const labels: Record<AnalyticsTab, string> = {
                     settlement: '정산 분석',
                     options:    '옵션 분석',
                     inflow:     '유입 경로',
                     payment:    '결제 수단',
+                    customers:  '고객 분석',
+                    regions:    '지역 분포',
                   }
                   return (
                     <button key={tab} onClick={() => setAnalyticsTab(tab)}
@@ -882,7 +954,6 @@ export default function ChannelSalesPage() {
                 {analyticsTab === 'payment' && (
                   <div className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
-                      {/* 결제수단 바 */}
                       <div className="bg-white border border-gray-100 rounded-xl p-5">
                         <p className="text-xs font-medium text-gray-600 mb-4">결제 수단별 주문 비중</p>
                         {analytics.paymentStats.length === 0 ? (
@@ -903,7 +974,6 @@ export default function ChannelSalesPage() {
                           </div>
                         )}
                       </div>
-                      {/* 멤버십 */}
                       <div className="bg-white border border-gray-100 rounded-xl p-5">
                         <p className="text-xs font-medium text-gray-600 mb-4">네이버플러스 멤버십</p>
                         <div className="flex flex-col items-center justify-center h-32 gap-2">
@@ -917,6 +987,124 @@ export default function ChannelSalesPage() {
                       </div>
                     </div>
                   </div>
+                )}
+
+                {/* ── 고객 분석 탭 ── */}
+                {analyticsTab === 'customers' && (
+                  customerLoading ? (
+                    <div className="py-12 text-center text-sm text-gray-400 bg-white rounded-xl border border-gray-100">고객 데이터 분석 중...</div>
+                  ) : !customerData ? (
+                    <div className="py-12 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">데이터를 불러올 수 없습니다</div>
+                  ) : (
+                    <div className="space-y-4">
+                      {/* 요약 카드 */}
+                      <div className="grid grid-cols-4 gap-3">
+                        <div className="bg-purple-50 border border-purple-100 rounded-xl p-4">
+                          <p className="text-xs text-purple-600 mb-1">전체 고객</p>
+                          <p className="text-2xl font-bold text-purple-700">{customerData.summary.totalCustomers}<span className="text-sm font-normal ml-1">명</span></p>
+                        </div>
+                        <div className="bg-green-50 border border-green-100 rounded-xl p-4">
+                          <p className="text-xs text-green-600 mb-1">재구매 고객</p>
+                          <p className="text-2xl font-bold text-green-700">{customerData.summary.repeatCount}<span className="text-sm font-normal ml-1">명</span></p>
+                          <p className="text-xs text-green-500 mt-1">재구매율 {customerData.summary.repeatRate}%</p>
+                        </div>
+                        <div className="bg-yellow-50 border border-yellow-100 rounded-xl p-4">
+                          <p className="text-xs text-yellow-600 mb-1">VIP (5회+)</p>
+                          <p className="text-2xl font-bold text-yellow-700">{customerData.summary.vipCount}<span className="text-sm font-normal ml-1">명</span></p>
+                        </div>
+                        <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
+                          <p className="text-xs text-indigo-600 mb-1">재구매 매출 비중</p>
+                          <p className="text-2xl font-bold text-indigo-700">{customerData.summary.repeatRevenueRate}<span className="text-sm font-normal ml-1">%</span></p>
+                          <p className="text-xs text-indigo-500 mt-1">{customerData.summary.repeatRevenue.toLocaleString()}원</p>
+                        </div>
+                      </div>
+                      {/* 고객 테이블 */}
+                      <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
+                        <div className="px-4 py-3 border-b border-gray-50">
+                          <p className="text-xs font-medium text-gray-600">고객 목록 (구매금액 순)</p>
+                        </div>
+                        <table className="w-full text-xs">
+                          <thead className="bg-gray-50 text-gray-500">
+                            <tr>{['등급','이름','주문수','총 구매금액','평균 주문금액','최근 구매','선호 상품'].map(h => <th key={h} className="px-3 py-2.5 text-left font-medium">{h}</th>)}</tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-50">
+                            {customerData.customers.slice(0, 30).map(c => (
+                              <tr key={c.tel} className="hover:bg-gray-50">
+                                <td className="px-3 py-2.5">
+                                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
+                                    c.grade === 'VIP' ? 'bg-yellow-100 text-yellow-700' :
+                                    c.grade === '단골' ? 'bg-green-100 text-green-700' :
+                                    'bg-gray-100 text-gray-500'
+                                  }`}>{c.grade}</span>
+                                </td>
+                                <td className="px-3 py-2.5 font-medium text-gray-700">{c.name}</td>
+                                <td className="px-3 py-2.5 text-center text-gray-600">{c.orderCount}회</td>
+                                <td className="px-3 py-2.5 font-semibold text-green-600">{c.totalAmount.toLocaleString()}원</td>
+                                <td className="px-3 py-2.5 text-gray-500">{c.avgAmount.toLocaleString()}원</td>
+                                <td className="px-3 py-2.5 text-gray-400 font-mono">{c.lastOrderDate}</td>
+                                <td className="px-3 py-2.5 text-gray-400 max-w-[180px] truncate" title={c.topProducts.join(', ')}>{c.topProducts[0] ?? '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        {customerData.customers.length > 30 && (
+                          <p className="text-xs text-gray-400 text-center py-2">상위 30명 표시 중 (전체 {customerData.customers.length}명)</p>
+                        )}
+                      </div>
+                    </div>
+                  )
+                )}
+
+                {/* ── 지역 분포 탭 ── */}
+                {analyticsTab === 'regions' && (
+                  regionLoading ? (
+                    <div className="py-12 text-center text-sm text-gray-400 bg-white rounded-xl border border-gray-100">지역 데이터 분석 중...</div>
+                  ) : !regionData ? (
+                    <div className="py-12 text-center text-sm text-gray-400 bg-gray-50 rounded-xl">데이터를 불러올 수 없습니다</div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        {/* 지역별 바 차트 */}
+                        <div className="bg-white border border-gray-100 rounded-xl p-5">
+                          <p className="text-xs font-medium text-gray-600 mb-4">시/도별 주문 건수</p>
+                          <div className="space-y-2.5">
+                            {regionData.regions.map((r, i) => (
+                              <div key={r.region}>
+                                <div className="flex justify-between text-xs mb-1">
+                                  <span className="text-gray-700 font-medium w-12">{r.region}</span>
+                                  <span className="text-gray-500">{r.count}건 ({r.countShare}%)</span>
+                                </div>
+                                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                                  <div className={`h-2 ${BAR_COLORS[i % BAR_COLORS.length]} rounded-full`} style={{ width: `${r.countShare}%` }} />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        {/* 지역별 매출 테이블 */}
+                        <div className="bg-white border border-gray-100 rounded-xl overflow-hidden">
+                          <div className="px-4 py-3 border-b border-gray-50">
+                            <p className="text-xs font-medium text-gray-600">지역별 매출 상세</p>
+                          </div>
+                          <table className="w-full text-xs">
+                            <thead className="bg-gray-50 text-gray-500">
+                              <tr>{['지역','건수','매출','평균금액'].map(h => <th key={h} className="px-3 py-2 text-left font-medium">{h}</th>)}</tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50">
+                              {regionData.regions.map(r => (
+                                <tr key={r.region} className="hover:bg-gray-50">
+                                  <td className="px-3 py-2 font-medium text-gray-700">{r.region}</td>
+                                  <td className="px-3 py-2 text-gray-500">{r.count}건</td>
+                                  <td className="px-3 py-2 font-semibold text-green-600">{r.revenue.toLocaleString()}원</td>
+                                  <td className="px-3 py-2 text-gray-400">{r.avgAmount.toLocaleString()}원</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  )
                 )}
               </div>
             )}

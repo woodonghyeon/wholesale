@@ -13,6 +13,15 @@ import { formatMoney } from '@/lib/utils/format'
 const inputCls = 'w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500'
 const labelCls = 'block text-sm font-medium text-gray-700 mb-1'
 
+interface VelocityItem {
+  name: string
+  currentStock: number
+  daysLeft: number | null
+  reorderQty: number
+  dailySales: number
+  urgent: boolean
+}
+
 export default function InventoryPage() {
   const [rows, setRows] = useState<InventoryRow[]>([])
   const [businesses, setBusinesses] = useState<Business[]>([])
@@ -22,6 +31,8 @@ export default function InventoryPage() {
   const [whFilter, setWhFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [showLow, setShowLow] = useState(false)
+  const [velocity, setVelocity] = useState<Map<string, VelocityItem>>(new Map())
+  const [showReorder, setShowReorder] = useState(false)
 
   // 재고 조정 모달
   const [adjustModal, setAdjustModal] = useState(false)
@@ -39,8 +50,21 @@ export default function InventoryPage() {
       const [b, w] = await Promise.all([getBusinesses(), getWarehouses()])
       setBusinesses(b); setWarehouses(w)
       await loadInventory()
+      loadVelocity()
     } catch (e: unknown) { toast.error((e as Error).message) }
     finally { setLoading(false) }
+  }
+
+  async function loadVelocity() {
+    try {
+      const res = await fetch('/api/analytics/stock-velocity?days=30')
+      const data = await res.json()
+      if (data.success) {
+        const m = new Map<string, VelocityItem>()
+        for (const item of data.items) m.set(item.name, item)
+        setVelocity(m)
+      }
+    } catch { /* 무시 */ }
   }
 
   async function loadInventory() {
@@ -82,6 +106,48 @@ export default function InventoryPage() {
   return (
     <div>
       <PageHeader title="재고 관리" description={`총 ${filtered.length}개 품목 · 재고 가치 ${formatMoney(totalValue)}원`} />
+
+      {/* 발주 추천 섹션 */}
+      {velocity.size > 0 && (() => {
+        const urgentItems = Array.from(velocity.values()).filter(v => v.urgent)
+        if (!urgentItems.length) return null
+        return (
+          <div className="mb-6 bg-red-50 border border-red-100 rounded-2xl p-4">
+            <button
+              onClick={() => setShowReorder(v => !v)}
+              className="flex items-center justify-between w-full text-left"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-base">📦</span>
+                <p className="text-sm font-semibold text-red-700">발주 추천 — {urgentItems.length}개 품목 소진 임박</p>
+              </div>
+              <span className="text-red-400 text-sm">{showReorder ? '▲' : '▼'}</span>
+            </button>
+            {showReorder && (
+              <div className="mt-3 space-y-2">
+                {urgentItems.map(item => (
+                  <div key={item.name} className="flex items-center justify-between bg-white rounded-lg px-3 py-2.5 text-xs">
+                    <span className="font-medium text-gray-700 truncate max-w-[200px]">{item.name}</span>
+                    <div className="flex items-center gap-3 shrink-0 ml-2">
+                      <span className="text-gray-400">현재 {item.currentStock}개</span>
+                      {item.dailySales > 0 && <span className="text-gray-400">일 {item.dailySales}개 판매</span>}
+                      {item.daysLeft !== null
+                        ? <span className={`px-2 py-0.5 rounded-full font-bold ${item.daysLeft <= 3 ? 'bg-red-100 text-red-600' : 'bg-orange-100 text-orange-600'}`}>
+                            {item.daysLeft}일 후 소진
+                          </span>
+                        : <span className="px-2 py-0.5 rounded-full font-bold bg-orange-100 text-orange-600">안전재고 이하</span>
+                      }
+                      {item.reorderQty > 0 && (
+                        <span className="text-blue-600 font-semibold">→ {item.reorderQty}개 발주 추천</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {/* 요약 카드 */}
       <div className="grid grid-cols-3 gap-4 mb-6">
@@ -131,7 +197,7 @@ export default function InventoryPage() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-500 text-xs">
               <tr>
-                {['상품명','카테고리','창고','현재고','안전재고','매입가','재고가치',''].map(h => (
+                {['상품명','카테고리','창고','현재고','안전재고','소진예측','매입가','재고가치',''].map(h => (
                   <th key={h} className="px-4 py-3 text-left font-medium">{h}</th>
                 ))}
               </tr>
@@ -142,11 +208,13 @@ export default function InventoryPage() {
               )}
               {filtered.map((r, i) => {
                 const isLow = r.min_stock > 0 && r.quantity <= r.min_stock
+                const vel = velocity.get(r.product_name)
                 return (
                   <tr key={`${r.product_id}-${r.warehouse_id}-${i}`} className={`hover:bg-gray-50 ${isLow ? 'bg-orange-50/40' : ''}`}>
                     <td className="px-4 py-3 font-medium">
                       {r.product_name}
                       {isLow && <span className="ml-1.5 text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full">부족</span>}
+                      {vel?.urgent && !isLow && <span className="ml-1.5 text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full">임박</span>}
                     </td>
                     <td className="px-4 py-3 text-gray-500">{r.category ?? '-'}</td>
                     <td className="px-4 py-3 text-gray-500">{r.warehouse_name}</td>
@@ -155,6 +223,16 @@ export default function InventoryPage() {
                       <span className="text-gray-400 text-xs ml-1">{r.unit}</span>
                     </td>
                     <td className="px-4 py-3 text-gray-400">{r.min_stock > 0 ? r.min_stock : '-'}</td>
+                    <td className="px-4 py-3 text-xs">
+                      {vel?.daysLeft != null
+                        ? <span className={`font-medium ${vel.daysLeft <= 7 ? 'text-red-500' : vel.daysLeft <= 14 ? 'text-orange-500' : 'text-gray-500'}`}>
+                            {vel.daysLeft}일 후
+                          </span>
+                        : vel?.dailySales === 0
+                          ? <span className="text-gray-300">-</span>
+                          : <span className="text-gray-400">-</span>
+                      }
+                    </td>
                     <td className="px-4 py-3">{formatMoney(r.buy_price)}원</td>
                     <td className="px-4 py-3 font-medium">{formatMoney(r.quantity * r.buy_price)}원</td>
                     <td className="px-4 py-3 text-right">

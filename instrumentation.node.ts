@@ -80,7 +80,7 @@ if (!global.__naverCronStarted && process.env.NAVER_COMMERCE_CLIENT_ID) {
   global.__naverCronStarted = true
 
   import('node-cron').then(({ default: cron }) => {
-    // */2 * * * * = 매 2분
+    // ── 매 2분: 네이버 주문 동기화 ──────────────────────────────
     cron.schedule('*/2 * * * *', async () => {
       try {
         const { runNaverAutoSync } = await import('./lib/naver/auto-sync')
@@ -98,8 +98,37 @@ if (!global.__naverCronStarted && process.env.NAVER_COMMERCE_CLIENT_ID) {
       }
     })
 
-    addServerLog({ type: 'info', message: '✓ 네이버 자동 동기화 스케줄러 시작 (2분 간격)', path: 'instrumentation' })
-  }).catch(() => {
-    addServerLog({ type: 'error', message: 'node-cron 로드 실패 — npm install node-cron 필요', path: 'instrumentation' })
+    // ── 매일 오전 9시: 일일 리포트 + 재고 소진 알림 ─────────────
+    cron.schedule('0 9 * * *', async () => {
+      try {
+        const { sendDailyReport, sendStockAlert } = await import('./lib/telegram/reports')
+        await sendDailyReport()
+        await sendStockAlert()
+        const msg = '✓ 일일 리포트 전송 완료'
+        console.log(`[Daily Report] ${msg}`)
+        addServerLog({ type: 'info', message: msg, path: '/cron/daily-report' })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error(`[Daily Report] ✗ 실패: ${msg}`)
+        addServerLog({ type: 'error', message: `✗ 일일 리포트 실패: ${msg}`, path: '/cron/daily-report' })
+      }
+    }, { timezone: 'Asia/Seoul' })
+
+    // ── 매주 월요일 오전 9시: 주간 리포트 ───────────────────────
+    cron.schedule('0 9 * * 1', async () => {
+      try {
+        const { sendWeeklyReport } = await import('./lib/telegram/reports')
+        await sendWeeklyReport()
+        const msg = '✓ 주간 리포트 전송 완료'
+        console.log(`[Weekly Report] ${msg}`)
+        addServerLog({ type: 'info', message: msg, path: '/cron/weekly-report' })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        console.error(`[Weekly Report] ✗ 실패: ${msg}`)
+        addServerLog({ type: 'error', message: `✗ 주간 리포트 실패: ${msg}`, path: '/cron/weekly-report' })
+      }
+    }, { timezone: 'Asia/Seoul' })
+
+    addServerLog({ type: 'info', message: '✓ 스케줄러 시작: 동기화(2분) / 일일리포트(09:00) / 주간리포트(월09:00)', path: 'instrumentation' })
   })
 }
