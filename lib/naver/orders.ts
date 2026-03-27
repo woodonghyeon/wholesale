@@ -20,36 +20,98 @@ export interface NaverProductOrder {
   paymentDate: string
   productOrderStatus: NaverProductOrderStatus
   productName: string
+  productNo: string
+  channelProductNo: string
+  productOption: string
   quantity: number
   unitPrice: number
   totalPaymentAmount: number
+  discountAmount: number
+  expectedSettlementAmount: number
+  paymentCommission: number
+  saleCommission: number
   ordererName: string
   ordererTel: string
+  receiverName: string
+  receiverTel: string
+  receiverAddress: string
+  receiverZipCode: string
+  receiverLat: number | null
+  receiverLng: number | null
+  deliveryCompany: string
+  trackingNumber: string
+  deliveryStatus: string
+  inflowPath: string
+  paymentMeans: string
+  isMembershipSubscribed: boolean
+}
+
+interface RawProductOrder {
+  productOrderId: string
+  productOrderStatus: NaverProductOrderStatus
+  productName: string
+  quantity: number
+  unitPrice: number
+  totalPaymentAmount: number
+  discountAmount?: number
+  expectedSettlementAmount?: number
+  paymentCommission?: number
+  saleCommission?: number
+  inflowPath?: string
+  paymentMeans?: string
+  isMembershipSubscribed?: boolean
+  // 상품 번호
+  originProductNo?: number
+  channelProductNo?: number
+  // 옵션
+  productOption?: string
+  itemOptions?: { optionName: string; optionValue: string }[]
+}
+
+interface RawOrder {
+  orderId: string
+  orderDate: string
+  paymentDate: string
+  ordererName: string
+  ordererTel: string
+}
+
+interface RawShippingAddress {
+  name?: string
+  tel?: string
+  baseAddress?: string
+  detailAddress?: string
+  zipCode?: string
+  lat?: number
+  lng?: number
+}
+
+interface RawDelivery {
+  deliveryCompany?: string
+  trackingNumber?: string
+  deliveryStatus?: string
 }
 
 interface RawContent {
   productOrderId: string
   content: {
-    order: {
-      orderId: string
-      orderDate: string
-      paymentDate: string
-      ordererName: string
-      ordererTel: string
-    }
-    productOrder: {
-      productOrderId: string
-      productOrderStatus: NaverProductOrderStatus
-      productName: string
-      quantity: number
-      unitPrice: number
-      totalPaymentAmount: number
-    }
+    order: RawOrder
+    productOrder: RawProductOrder
+    shippingAddress?: RawShippingAddress
+    delivery?: RawDelivery
   }
 }
 
+function buildProductOption(po: RawProductOrder): string {
+  if (po.productOption) return po.productOption
+  if (po.itemOptions?.length) {
+    return po.itemOptions.map(o => `${o.optionName}: ${o.optionValue}`).join(', ')
+  }
+  return ''
+}
+
 function mapOrder(raw: RawContent): NaverProductOrder {
-  const { order, productOrder } = raw.content
+  const { order, productOrder, shippingAddress, delivery } = raw.content
   return {
     productOrderId: productOrder.productOrderId,
     orderId: order.orderId,
@@ -57,11 +119,32 @@ function mapOrder(raw: RawContent): NaverProductOrder {
     paymentDate: order.paymentDate,
     productOrderStatus: productOrder.productOrderStatus,
     productName: productOrder.productName,
+    productNo: String(productOrder.originProductNo ?? ''),
+    channelProductNo: String(productOrder.channelProductNo ?? ''),
+    productOption: buildProductOption(productOrder),
     quantity: productOrder.quantity,
     unitPrice: productOrder.unitPrice,
     totalPaymentAmount: productOrder.totalPaymentAmount,
+    discountAmount: productOrder.discountAmount ?? 0,
+    expectedSettlementAmount: productOrder.expectedSettlementAmount ?? 0,
+    paymentCommission: productOrder.paymentCommission ?? 0,
+    saleCommission: productOrder.saleCommission ?? 0,
     ordererName: order.ordererName,
     ordererTel: order.ordererTel,
+    receiverName: shippingAddress?.name ?? '',
+    receiverTel: shippingAddress?.tel ?? '',
+    receiverAddress: shippingAddress
+      ? [shippingAddress.baseAddress, shippingAddress.detailAddress].filter(Boolean).join(' ')
+      : '',
+    receiverZipCode: shippingAddress?.zipCode ?? '',
+    receiverLat: shippingAddress?.lat ?? null,
+    receiverLng: shippingAddress?.lng ?? null,
+    deliveryCompany: delivery?.deliveryCompany ?? '',
+    trackingNumber: delivery?.trackingNumber ?? '',
+    deliveryStatus: delivery?.deliveryStatus ?? '',
+    inflowPath: productOrder.inflowPath ?? '',
+    paymentMeans: productOrder.paymentMeans ?? '',
+    isMembershipSubscribed: productOrder.isMembershipSubscribed ?? false,
   }
 }
 
@@ -86,11 +169,15 @@ async function fetchWithRetry(url: string, headers: Record<string, string>, retr
 async function fetchOrdersSince(from: Date): Promise<NaverProductOrder[]> {
   const headers = await getNaverAuthHeaders()
   const all: NaverProductOrder[] = []
-  let nextToken: string | undefined
+  let page = 1
+  const size = 300
 
-  do {
-    const params = new URLSearchParams({ from: from.toISOString() })
-    if (nextToken) params.set('nextToken', nextToken)
+  while (true) {
+    const params = new URLSearchParams({
+      from: from.toISOString(),
+      page: String(page),
+      size: String(size),
+    })
 
     const res = await fetchWithRetry(
       `${BASE_URL}/external/v1/pay-order/seller/product-orders?${params}`,
@@ -105,8 +192,11 @@ async function fetchOrdersSince(from: Date): Promise<NaverProductOrder[]> {
     const data = await res.json()
     const contents: RawContent[] = data.data?.contents ?? []
     all.push(...contents.map(mapOrder))
-    nextToken = data.data?.pagination?.nextToken
-  } while (nextToken)
+
+    const hasNext = data.data?.pagination?.hasNext ?? false
+    if (!hasNext) break
+    page++
+  }
 
   return all
 }

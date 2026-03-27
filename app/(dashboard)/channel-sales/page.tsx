@@ -47,11 +47,21 @@ interface NaverOrder {
   paymentDate: string
   productOrderStatus: string
   productName: string
+  productOption: string
   quantity: number
   unitPrice: number
   totalPaymentAmount: number
+  expectedSettlementAmount: number
+  discountAmount: number
   ordererName: string
   ordererTel: string
+  receiverName: string
+  receiverAddress: string
+  deliveryCompany: string
+  trackingNumber: string
+  deliveryStatus: string
+  inflowPath: string
+  paymentMeans: string
 }
 
 const PAGE_SIZE_OPTIONS = [20, 50, 100]
@@ -121,7 +131,7 @@ export default function ChannelSalesPage() {
     return allOrders.filter(o => {
       const matchStatus = orderStatusFilter === 'all' || o.productOrderStatus === orderStatusFilter
       const q = orderSearch.toLowerCase()
-      const matchSearch = !q || o.productName.toLowerCase().includes(q) || o.ordererName.toLowerCase().includes(q) || o.productOrderId.includes(q)
+      const matchSearch = !q || o.productName.toLowerCase().includes(q) || o.ordererName.toLowerCase().includes(q) || o.productOrderId.includes(q) || (o.trackingNumber ?? '').includes(q) || (o.receiverName ?? '').toLowerCase().includes(q)
       return matchStatus && matchSearch
     }).sort((a, b) => {
       const da = (a.paymentDate ?? a.orderDate) || ''
@@ -132,6 +142,15 @@ export default function ChannelSalesPage() {
 
   const orderTotalPages = Math.max(1, Math.ceil(filteredOrders.length / orderPageSize))
   const paginatedOrders = filteredOrders.slice((orderPage - 1) * orderPageSize, orderPage * orderPageSize)
+
+  const orderSummary = useMemo(() => {
+    const active = filteredOrders.filter(o => !['CANCELED', 'CANCEL_REQUEST', 'RETURNED', 'RETURN_REQUEST'].includes(o.productOrderStatus))
+    return {
+      totalRevenue: active.reduce((s, o) => s + o.totalPaymentAmount, 0),
+      totalSettlement: active.reduce((s, o) => s + (o.expectedSettlementAmount ?? 0), 0),
+      withTracking: filteredOrders.filter(o => !!o.trackingNumber).length,
+    }
+  }, [filteredOrders])
 
   const orderPageNumbers = useMemo(() => {
     const pages: (number | '...')[] = []
@@ -499,17 +518,37 @@ export default function ChannelSalesPage() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl border border-gray-100 overflow-hidden">
+        {/* 요약 */}
+        {filteredOrders.length > 0 && (
+          <div className="grid grid-cols-3 gap-3 mb-3">
+            <div className="bg-green-50 border border-green-100 rounded-xl px-4 py-3">
+              <p className="text-xs text-green-600 mb-0.5">결제금액 합계</p>
+              <p className="text-lg font-bold text-green-700">{orderSummary.totalRevenue.toLocaleString()}원</p>
+            </div>
+            <div className="bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3">
+              <p className="text-xs text-indigo-600 mb-0.5">정산 예정금</p>
+              <p className="text-lg font-bold text-indigo-700">
+                {orderSummary.totalSettlement > 0 ? `${orderSummary.totalSettlement.toLocaleString()}원` : '—'}
+              </p>
+            </div>
+            <div className="bg-sky-50 border border-sky-100 rounded-xl px-4 py-3">
+              <p className="text-xs text-sky-600 mb-0.5">배송추적 가능</p>
+              <p className="text-lg font-bold text-sky-700">{orderSummary.withTracking}건</p>
+            </div>
+          </div>
+        )}
+
+        <div className="bg-white rounded-xl border border-gray-100 overflow-x-auto">
           {ordersLoading ? (
             <div className="py-12 text-center text-sm text-gray-400">불러오는 중...</div>
           ) : filteredOrders.length === 0 ? (
             <div className="py-12 text-center text-sm text-gray-400">주문 내역이 없습니다</div>
           ) : (
-            <table className="w-full text-sm">
+            <table className="w-full text-sm min-w-[1100px]">
               <thead className="bg-gray-50 text-gray-500 text-xs">
                 <tr>
-                  {['주문일', '주문번호', '상품명', '수량', '단가', '결제금액', '주문자', '상태'].map(h => (
-                    <th key={h} className="px-4 py-3 text-left font-medium">{h}</th>
+                  {['주문일', '주문번호', '상품명/옵션', '수량', '결제금액', '정산예정', '주문자', '수신자', '배송추적', '상태'].map(h => (
+                    <th key={h} className="px-3 py-3 text-left font-medium whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -517,19 +556,52 @@ export default function ChannelSalesPage() {
                 {paginatedOrders.map(o => {
                   const st = STATUS_LABEL[o.productOrderStatus] ?? { label: o.productOrderStatus, color: 'bg-gray-100 text-gray-500' }
                   const date = (o.paymentDate ?? o.orderDate ?? '')
+                  const hasTracking = !!o.trackingNumber
+                  const settlement = o.expectedSettlementAmount ?? 0
                   return (
                     <tr key={o.productOrderId} className="hover:bg-gray-50">
-                      <td className="px-4 py-2.5 text-xs text-gray-500 font-mono whitespace-nowrap">{date.slice(0, 10)}</td>
-                      <td className="px-4 py-2.5 text-xs text-gray-400 font-mono">{o.productOrderId}</td>
-                      <td className="px-4 py-2.5 font-medium text-gray-800 max-w-[220px]">
-                        <span className="line-clamp-1" title={o.productName}>{o.productName}</span>
+                      <td className="px-3 py-2.5 text-xs text-gray-500 font-mono whitespace-nowrap">{date.slice(0, 10)}</td>
+                      <td className="px-3 py-2.5 text-xs text-gray-400 font-mono whitespace-nowrap">{o.productOrderId}</td>
+                      <td className="px-3 py-2.5 max-w-[200px]">
+                        <div className="font-medium text-gray-800 text-xs line-clamp-1" title={o.productName}>{o.productName}</div>
+                        {o.productOption && (
+                          <div className="text-gray-400 text-xs truncate mt-0.5" title={o.productOption}>{o.productOption}</div>
+                        )}
                       </td>
-                      <td className="px-4 py-2.5 text-center text-gray-600">{o.quantity}</td>
-                      <td className="px-4 py-2.5 text-gray-500">{o.unitPrice.toLocaleString()}원</td>
-                      <td className="px-4 py-2.5 font-semibold text-green-600">{o.totalPaymentAmount.toLocaleString()}원</td>
-                      <td className="px-4 py-2.5 text-gray-600">{o.ordererName}</td>
-                      <td className="px-4 py-2.5">
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${st.color}`}>{st.label}</span>
+                      <td className="px-3 py-2.5 text-center text-gray-600 text-xs">{o.quantity}</td>
+                      <td className="px-3 py-2.5 font-semibold text-green-600 text-xs whitespace-nowrap">
+                        {o.totalPaymentAmount.toLocaleString()}원
+                        {(o.discountAmount ?? 0) > 0 && (
+                          <div className="text-red-400 font-normal">-{o.discountAmount.toLocaleString()}</div>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 text-xs whitespace-nowrap">
+                        {settlement > 0
+                          ? <span className="text-indigo-600 font-medium">{settlement.toLocaleString()}원</span>
+                          : <span className="text-gray-300">—</span>
+                        }
+                      </td>
+                      <td className="px-3 py-2.5 text-xs text-gray-600 whitespace-nowrap">{o.ordererName}</td>
+                      <td className="px-3 py-2.5 text-xs max-w-[140px]">
+                        {o.receiverName ? (
+                          <>
+                            <div className="text-gray-700 font-medium">{o.receiverName}</div>
+                            {o.receiverAddress && (
+                              <div className="text-gray-400 truncate text-xs" title={o.receiverAddress}>{o.receiverAddress}</div>
+                            )}
+                          </>
+                        ) : <span className="text-gray-300">—</span>}
+                      </td>
+                      <td className="px-3 py-2.5 text-xs">
+                        {hasTracking ? (
+                          <div>
+                            <div className="text-gray-600 font-mono text-xs">{o.trackingNumber}</div>
+                            <div className="text-gray-400 text-xs">{o.deliveryCompany}</div>
+                          </div>
+                        ) : <span className="text-gray-300">—</span>}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <span className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${st.color}`}>{st.label}</span>
                       </td>
                     </tr>
                   )

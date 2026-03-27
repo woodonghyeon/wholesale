@@ -56,7 +56,43 @@ async function saveOrdersToDB(orders: NaverProductOrder[]) {
     const slipDate = (order.paymentDate ?? order.orderDate).slice(0, 10)
     const memo = `[naver]${order.productOrderId}`
 
-    // 혹시라도 중복 저장 방지 (upsert 불가 시 skip)
+    // ── naver_orders upsert (전체 원본 데이터 저장) ──────────
+    await supabase.from('naver_orders').upsert({
+      product_order_id:           order.productOrderId,
+      order_id:                   order.orderId,
+      order_date:                 order.orderDate || null,
+      payment_date:               order.paymentDate || null,
+      status:                     order.productOrderStatus,
+      product_name:               order.productName,
+      product_no:                 order.productNo || null,
+      channel_product_no:         order.channelProductNo || null,
+      product_option:             order.productOption || null,
+      quantity:                   order.quantity,
+      unit_price:                 order.unitPrice,
+      total_payment_amount:       order.totalPaymentAmount,
+      discount_amount:            order.discountAmount,
+      expected_settlement_amount: order.expectedSettlementAmount,
+      payment_commission:         order.paymentCommission,
+      sale_commission:            order.saleCommission,
+      orderer_name:               order.ordererName,
+      orderer_tel:                order.ordererTel,
+      receiver_name:              order.receiverName || null,
+      receiver_tel:               order.receiverTel || null,
+      receiver_address:           order.receiverAddress || null,
+      receiver_zip_code:          order.receiverZipCode || null,
+      receiver_lat:               order.receiverLat,
+      receiver_lng:               order.receiverLng,
+      delivery_company:           order.deliveryCompany || null,
+      tracking_number:            order.trackingNumber || null,
+      delivery_status:            order.deliveryStatus || null,
+      inflow_path:                order.inflowPath || null,
+      payment_means:              order.paymentMeans || null,
+      is_membership_subscribed:   order.isMembershipSubscribed,
+      business_id:                businessId,
+      synced_at:                  new Date().toISOString(),
+    }, { onConflict: 'product_order_id' })
+
+    // ── slips 중복 체크 후 저장 ──────────────────────────────
     const { count } = await supabase
       .from('slips')
       .select('id', { count: 'exact', head: true })
