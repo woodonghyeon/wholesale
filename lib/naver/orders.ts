@@ -118,6 +118,12 @@ export async function getNaverOrders(lastDays = 7): Promise<NaverProductOrder[]>
   return fetchOrdersSince(from)
 }
 
+/** 최근 N시간 주문 조회 — 오늘 신규 주문 실시간 캡처용 */
+export async function getNaverOrdersLastHours(hours: number): Promise<NaverProductOrder[]> {
+  const from = new Date(Date.now() - hours * 60 * 60 * 1000)
+  return fetchOrdersSince(from)
+}
+
 /** 특정 시각 이후 신규 주문만 조회 (2분 주기 증분 동기화용) */
 export async function getNaverOrdersSince(from: Date): Promise<NaverProductOrder[]> {
   return fetchOrdersSince(from)
