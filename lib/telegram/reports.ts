@@ -186,10 +186,9 @@ export async function sendStockAlert(): Promise<void> {
   const lines = [
     `⚠️ <b>재고 부족 알림 — ${lowItems.length}개 품목</b>`,
     '',
-    ...lowItems.slice(0, 10).map(i =>
-      `• ${i.name.length > 22 ? i.name.slice(0, 22) + '…' : i.name}\n  현재 ${i.quantity}개 (안전재고 ${i.min_stock}개)`
+    ...lowItems.map(i =>
+      `• ${i.name}\n  현재 ${i.quantity}개 (안전재고 ${i.min_stock}개)`
     ),
-    ...(lowItems.length > 10 ? [`외 ${lowItems.length - 10}개 품목 더`] : []),
     '',
     '→ 재고 관리 페이지에서 발주 처리하세요',
   ]

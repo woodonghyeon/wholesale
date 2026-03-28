@@ -188,7 +188,8 @@ export default function QuotesPage() {
                       {Object.entries(QUOTE_STATUS).map(([v, { label }]) => <option key={v} value={v}>{label}</option>)}
                     </select>
                   </td>
-                  <td className="px-4 py-3 text-right" onClick={e => e.stopPropagation()}>
+                  <td className="px-4 py-3 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                    <button onClick={() => window.open(`/api/pdf/quote?id=${q.id}&type=quote`, '_blank')} className="text-gray-400 hover:text-blue-600 text-xs mr-2">🖨️</button>
                     <button onClick={() => setConfirmId(q.id)} className="text-red-500 hover:underline text-xs">삭제</button>
                   </td>
                 </tr>
@@ -214,7 +215,8 @@ export default function QuotesPage() {
                     </select>
                   </td>
                   <td className="px-4 py-3 text-gray-400 max-w-[160px] truncate">{o.note ?? '-'}</td>
-                  <td className="px-4 py-3 text-right" onClick={e => e.stopPropagation()}>
+                  <td className="px-4 py-3 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                    <button onClick={() => window.open(`/api/pdf/quote?id=${o.id}&type=order`, '_blank')} className="text-gray-400 hover:text-blue-600 text-xs mr-2">🖨️</button>
                     <button onClick={() => setConfirmId(o.id)} className="text-red-500 hover:underline text-xs">삭제</button>
                   </td>
                 </tr>

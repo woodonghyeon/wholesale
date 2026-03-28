@@ -104,17 +104,17 @@ export default function PurchasePage() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-gray-500 text-xs">
                 <tr>
-                  {['날짜','공급사','결제','공급가','부가세','합계'].map(h => (
+                  {['날짜','공급사','결제','공급가','부가세','합계',''].map(h => (
                     <th key={h} className="px-4 py-3 text-left font-medium">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {filtered.length === 0 && (
-                  <tr><td colSpan={6} className="px-4 py-12 text-center text-gray-400">매입 내역이 없습니다</td></tr>
+                  <tr><td colSpan={7} className="px-4 py-12 text-center text-gray-400">매입 내역이 없습니다</td></tr>
                 )}
                 {filtered.map(r => (
-                  <tr key={r.id} className="hover:bg-gray-50">
+                  <tr key={r.id} className="hover:bg-gray-50 group">
                     <td className="px-4 py-3 font-mono text-xs text-gray-600">{r.slip_date}</td>
                     <td className="px-4 py-3 font-medium">{r.partner_name ?? '-'}</td>
                     <td className="px-4 py-3">
@@ -125,6 +125,14 @@ export default function PurchasePage() {
                     <td className="px-4 py-3">{formatMoney(r.supply_amount)}원</td>
                     <td className="px-4 py-3 text-gray-500">{formatMoney(r.tax_amount)}원</td>
                     <td className="px-4 py-3 font-bold">{formatMoney(r.total_amount)}원</td>
+                    <td className="px-4 py-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => window.open(`/api/pdf/slip?id=${r.id}`, '_blank')}
+                        className="text-xs text-gray-500 hover:text-blue-600 border border-gray-200 hover:border-blue-300 px-2 py-1 rounded"
+                      >
+                        🖨️ PDF
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

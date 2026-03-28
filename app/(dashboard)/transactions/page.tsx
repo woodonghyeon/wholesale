@@ -253,7 +253,11 @@ export default function TransactionsPage() {
                   <td className="px-4 py-3 text-gray-500">{formatMoney(sl.tax_amount)}원</td>
                   <td className="px-4 py-3 font-bold">{formatMoney(sl.total_amount)}원</td>
                   <td className="px-4 py-3 text-gray-400 max-w-[120px] truncate">{sl.memo ?? '-'}</td>
-                  <td className="px-4 py-3 text-right" onClick={e => e.stopPropagation()}>
+                  <td className="px-4 py-3 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                    <button
+                      onClick={() => window.open(`/api/pdf/slip?id=${sl.id}`, '_blank')}
+                      className="text-xs text-gray-400 hover:text-blue-600 mr-2"
+                    >🖨️</button>
                     <button onClick={() => setConfirmId(sl.id)} className="text-red-500 hover:underline text-xs">삭제</button>
                   </td>
                 </tr>

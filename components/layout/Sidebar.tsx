@@ -28,6 +28,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: '/channel-sales', label: '채널별 매출' },
       { href: '/quotes', label: '견적·발주' },
       { href: '/returns', label: '반품 관리' },
+      { href: '/shipping', label: '송장 관리' },
       { href: '/tax', label: '세금계산서' },
     ],
   },
@@ -77,6 +78,7 @@ const NAV_GROUPS: NavGroup[] = [
     icon: '⊕',
     items: [
       { href: '/reports', label: '종합 보고서' },
+      { href: '/profit', label: '이익 분석' },
       { href: '/quarterly', label: '분기별 집계표' },
       { href: '/alerts', label: '알림 센터' },
     ],
