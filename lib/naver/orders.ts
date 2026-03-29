@@ -166,8 +166,8 @@ async function fetchWithRetry(url: string, headers: Record<string, string>, retr
   throw new Error('네이버 API Rate Limit — 재시도 횟수 초과')
 }
 
-async function fetchOrdersSince(from: Date): Promise<NaverProductOrder[]> {
-  const headers = await getNaverAuthHeaders()
+async function fetchOrdersSince(from: Date, businessId?: string): Promise<NaverProductOrder[]> {
+  const headers = await getNaverAuthHeaders(businessId)
   const all: NaverProductOrder[] = []
   let page = 1
   const size = 300
@@ -202,26 +202,26 @@ async function fetchOrdersSince(from: Date): Promise<NaverProductOrder[]> {
 }
 
 /** 최근 N일치 주문 조회 (전체 초기 로드용) */
-export async function getNaverOrders(lastDays = 7): Promise<NaverProductOrder[]> {
+export async function getNaverOrders(lastDays = 7, businessId?: string): Promise<NaverProductOrder[]> {
   const from = new Date()
   from.setDate(from.getDate() - lastDays)
-  return fetchOrdersSince(from)
+  return fetchOrdersSince(from, businessId)
 }
 
 /** 최근 N시간 주문 조회 — 오늘 신규 주문 실시간 캡처용 */
-export async function getNaverOrdersLastHours(hours: number): Promise<NaverProductOrder[]> {
+export async function getNaverOrdersLastHours(hours: number, businessId?: string): Promise<NaverProductOrder[]> {
   const from = new Date(Date.now() - hours * 60 * 60 * 1000)
-  return fetchOrdersSince(from)
+  return fetchOrdersSince(from, businessId)
 }
 
 /** 특정 시각 이후 신규 주문만 조회 (2분 주기 증분 동기화용) */
-export async function getNaverOrdersSince(from: Date): Promise<NaverProductOrder[]> {
-  return fetchOrdersSince(from)
+export async function getNaverOrdersSince(from: Date, businessId?: string): Promise<NaverProductOrder[]> {
+  return fetchOrdersSince(from, businessId)
 }
 
 /** 반품·취소·교환 주문만 필터링 */
-export async function getNaverReturnOrders(lastDays = 60): Promise<NaverProductOrder[]> {
-  const all = await getNaverOrders(lastDays)
+export async function getNaverReturnOrders(lastDays = 60, businessId?: string): Promise<NaverProductOrder[]> {
+  const all = await getNaverOrders(lastDays, businessId)
   const returnStatuses: NaverProductOrderStatus[] = [
     'RETURN_REQUEST', 'RETURNED',
     'CANCEL_REQUEST', 'CANCELED',

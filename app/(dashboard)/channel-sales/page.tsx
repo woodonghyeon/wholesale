@@ -7,6 +7,7 @@ import { getBusinesses } from '@/lib/supabase/businesses'
 import { getSalesByChannel, getChannelMonthlySales, ChannelSaleRow } from '@/lib/supabase/channel-sales'
 import { Business } from '@/lib/types'
 import { formatMoney } from '@/lib/utils/format'
+import ProductDetailModal from '@/components/ui/ProductDetailModal'
 
 const COLORS = ['bg-blue-500', 'bg-violet-500', 'bg-green-500', 'bg-orange-500', 'bg-pink-500', 'bg-teal-500']
 const TEXT_COLORS = ['text-blue-600', 'text-violet-600', 'text-green-600', 'text-orange-600', 'text-pink-600', 'text-teal-600']
@@ -25,17 +26,21 @@ const STATUS_LABEL: Record<string, { label: string; color: string }> = {
 
 // ── 택배사 코드 → 이름 + 추적 URL ────────────────────────────────
 const CARRIER_INFO: Record<string, { name: string; url: (n: string) => string }> = {
-  CJLGST: { name: 'CJ대한통운', url: n => `https://trace.cjlogistics.com/next/tracking.html?wblNo=${n}` },
-  CJ:     { name: 'CJ대한통운', url: n => `https://trace.cjlogistics.com/next/tracking.html?wblNo=${n}` },
-  HANJIN: { name: '한진택배',   url: n => `https://www.hanjin.com/kor/CMS/DeliveryMgr/WaybillResult.do?mCode=MN038&schLang=KOR&wblnumText2=${n}` },
-  LTCGIS: { name: '롯데택배',   url: n => `https://www.lotteglogis.com/home/reservation/tracking/index?InvNo=${n}` },
-  LOTTE:  { name: '롯데택배',   url: n => `https://www.lotteglogis.com/home/reservation/tracking/index?InvNo=${n}` },
-  EPOST:  { name: '우체국',     url: n => `https://service.epost.go.kr/trace.RetrieveEmsRigiTraceList.retrieve?POST_CODE=${n}` },
-  LOGEN:  { name: '로젠택배',   url: n => `http://www.ilogen.com/m/personal/trace/${n}` },
-  HDEXP:  { name: '현대택배',   url: n => `https://hyundaitransco.com/delivery/tracking?trackingNo=${n}` },
-  KDEXP:  { name: '경동택배',   url: n => `https://kdexp.com/newDeliverySearch.ekd?barcode=${n}` },
-  CHUNIL: { name: '천일택배',   url: n => `https://www.chunil.co.kr/HTrace/HTrace.jsp?transNo=${n}` },
-  DONGBU: { name: '한덱스',     url: n => `https://www.handex.co.kr/tracking?invoiceno=${n}` },
+  CJLGST:       { name: 'CJ대한통운', url: n => `https://trace.cjlogistics.com/next/tracking.html?wblNo=${n}` },
+  CJGLS:        { name: 'CJ대한통운', url: n => `https://trace.cjlogistics.com/next/tracking.html?wblNo=${n}` },
+  CJ:           { name: 'CJ대한통운', url: n => `https://trace.cjlogistics.com/next/tracking.html?wblNo=${n}` },
+  HANJIN:       { name: '한진택배',   url: n => `https://www.hanjin.com/kor/CMS/DeliveryMgr/WaybillResult.do?mCode=MN038&schLang=KOR&wblnumText2=${n}` },
+  LTCGIS:       { name: '롯데택배',   url: n => `https://www.lotteglogis.com/home/reservation/tracking/index?InvNo=${n}` },
+  LOTTE:        { name: '롯데택배',   url: n => `https://www.lotteglogis.com/home/reservation/tracking/index?InvNo=${n}` },
+  EPOST:        { name: '우체국',     url: n => `https://service.epost.go.kr/trace.RetrieveEmsRigiTraceList.retrieve?POST_CODE=${n}` },
+  LOGEN:        { name: '로젠택배',   url: n => `http://www.ilogen.com/m/personal/trace/${n}` },
+  HDEXP:        { name: '현대택배',   url: n => `https://hyundaitransco.com/delivery/tracking?trackingNo=${n}` },
+  HYUNDAI:      { name: '롯데택배',   url: n => `https://www.lotteglogis.com/home/reservation/tracking/index?InvNo=${n}` },
+  HYUNDAILOGIS: { name: '현대택배',   url: n => `https://hyundaitransco.com/delivery/tracking?trackingNo=${n}` },
+  KDEXP:        { name: '경동택배',   url: n => `https://kdexp.com/newDeliverySearch.ekd?barcode=${n}` },
+  CHUNIL:       { name: '천일택배',   url: n => `https://www.chunil.co.kr/HTrace/HTrace.jsp?transNo=${n}` },
+  DONGBU:       { name: '한덱스',     url: n => `https://www.handex.co.kr/tracking?invoiceno=${n}` },
+  GSMNTON:      { name: 'GS네트웍스', url: n => `https://www.gsmnton.com/tracking?no=${n}` },
 }
 
 function getTrackingUrl(company: string, trackingNo: string): string {
@@ -80,6 +85,8 @@ interface NaverOrder {
   totalPaymentAmount: number
   expectedSettlementAmount: number
   discountAmount: number
+  saleCommission: number
+  paymentCommission: number
   ordererName: string
   ordererTel: string
   receiverName: string
@@ -175,6 +182,7 @@ export default function ChannelSalesPage() {
   const [analyticsTab, setAnalyticsTab] = useState<AnalyticsTab>('settlement')
   const [analyticsDays, setAnalyticsDays] = useState(30)
   const [showAnalytics, setShowAnalytics] = useState(false)
+  const [productDetailName, setProductDetailName] = useState<string | null>(null)
   const [customerData, setCustomerData] = useState<CustomerData | null>(null)
   const [customerLoading, setCustomerLoading] = useState(false)
   const [regionData, setRegionData] = useState<RegionData | null>(null)
@@ -200,32 +208,41 @@ export default function ChannelSalesPage() {
   const loadNaver = useCallback(async () => {
     setNaverLoading(true)
     try {
-      const res = await fetch('/api/naver/stats')
+      const bizParam = bizFilter !== 'all' ? `?business_id=${bizFilter}` : ''
+      const res = await fetch(`/api/naver/stats${bizParam}`)
       const data = await res.json()
       if (data.success) setNaverStats(data)
     } catch { /* 네이버 미연동 시 무시 */ }
     finally { setNaverLoading(false) }
-  }, [])
+  }, [bizFilter])
 
-  const loadOrders = useCallback(async () => {
+  const [ordersSource, setOrdersSource] = useState<string>('')
+
+  const loadOrders = useCallback(async (forceRefresh = false) => {
     setOrdersLoading(true)
     try {
-      const res = await fetch(`/api/naver/orders?days=${orderDays}`)
+      const bizParam = bizFilter !== 'all' ? `&business_id=${bizFilter}` : ''
+      const url = `/api/naver/orders?days=${orderDays}${forceRefresh ? '&refresh=1' : ''}${bizParam}`
+      const res = await fetch(url)
       const data = await res.json()
-      if (data.success) setAllOrders(data.orders ?? [])
+      if (data.success) {
+        setAllOrders(data.orders ?? [])
+        setOrdersSource(data.source === 'cache' ? `캐시 (${new Date(data.cachedAt).toLocaleTimeString('ko', { hour: '2-digit', minute: '2-digit' })} 기준)` : 'API 실시간')
+      }
     } catch { /* 무시 */ }
     finally { setOrdersLoading(false) }
-  }, [orderDays])
+  }, [orderDays, bizFilter])
 
   const loadAnalytics = useCallback(async () => {
     setAnalyticsLoading(true)
     try {
-      const res = await fetch(`/api/naver/analytics?days=${analyticsDays}`)
+      const bizParam = bizFilter !== 'all' ? `&business_id=${bizFilter}` : ''
+      const res = await fetch(`/api/naver/analytics?days=${analyticsDays}${bizParam}`)
       const data = await res.json()
       if (data.success) setAnalytics(data)
     } catch { /* 무시 */ }
     finally { setAnalyticsLoading(false) }
-  }, [analyticsDays])
+  }, [analyticsDays, bizFilter])
 
   const loadCustomers = useCallback(async () => {
     setCustomerLoading(true)
@@ -249,7 +266,7 @@ export default function ChannelSalesPage() {
 
   useEffect(() => { load() }, [load])
   useEffect(() => { loadNaver() }, [loadNaver])
-  useEffect(() => { loadOrders() }, [loadOrders])
+  useEffect(() => { loadOrders(false) }, [loadOrders])
   useEffect(() => { setOrderPage(1) }, [orderSearch, orderStatusFilter, orderDays, orderPageSize])
 
   // 분석 탭 열릴 때 최초 1회 로드
@@ -287,10 +304,18 @@ export default function ChannelSalesPage() {
 
   const orderSummary = useMemo(() => {
     const active = filteredOrders.filter(o => !['CANCELED', 'CANCEL_REQUEST', 'RETURNED', 'RETURN_REQUEST'].includes(o.productOrderStatus))
+    const totalRevenue    = active.reduce((s, o) => s + o.totalPaymentAmount, 0)
+    const totalSaleComm   = active.reduce((s, o) => s + (o.saleCommission ?? 0), 0)
+    const totalPayComm    = active.reduce((s, o) => s + (o.paymentCommission ?? 0), 0)
+    const totalCommission = totalSaleComm + totalPayComm
     return {
-      totalRevenue:    active.reduce((s, o) => s + o.totalPaymentAmount, 0),
+      totalRevenue,
       totalSettlement: active.reduce((s, o) => s + (o.expectedSettlementAmount ?? 0), 0),
-      withTracking:    filteredOrders.filter(o => !!o.trackingNumber).length,
+      totalSaleComm,
+      totalPayComm,
+      totalCommission,
+      commissionRate: totalRevenue > 0 ? Math.round(totalCommission / totalRevenue * 100 * 10) / 10 : 0,
+      withTracking:   filteredOrders.filter(o => !!o.trackingNumber).length,
     }
   }, [filteredOrders])
 
@@ -620,7 +645,13 @@ export default function ChannelSalesPage() {
           <div className="w-6 h-6 bg-green-500 rounded-md flex items-center justify-center text-white text-xs font-bold">N</div>
           <p className="text-sm font-semibold text-gray-800">네이버 주문 상세 목록</p>
           <span className="text-xs text-gray-400">({filteredOrders.length}건)</span>
-          <button onClick={loadOrders} className="ml-auto text-xs text-gray-400 hover:text-gray-600 border border-gray-200 rounded px-2 py-0.5">↺ 새로고침</button>
+          <div className="ml-auto flex items-center gap-2">
+            {ordersLoading
+              ? <span className="text-xs text-blue-500 flex items-center gap-1"><span className="inline-block w-3 h-3 border-2 border-blue-200 border-t-blue-500 rounded-full animate-spin" />자동 동기화 중...</span>
+              : ordersSource && <span className="text-xs text-gray-400">{ordersSource}</span>
+            }
+            <button onClick={() => loadOrders(true)} disabled={ordersLoading} className="text-xs text-gray-400 hover:text-gray-600 border border-gray-200 rounded px-2 py-0.5 disabled:opacity-40">↺ 강제 새로고침</button>
+          </div>
         </div>
 
         {/* 툴바 */}
@@ -658,16 +689,33 @@ export default function ChannelSalesPage() {
 
         {/* 요약 */}
         {filteredOrders.length > 0 && (
-          <div className="grid grid-cols-3 gap-3 mb-3">
+          <div className="grid grid-cols-5 gap-3 mb-3">
             <div className="bg-green-50 border border-green-100 rounded-xl px-4 py-3">
               <p className="text-xs text-green-600 mb-0.5">결제금액 합계</p>
               <p className="text-lg font-bold text-green-700">{orderSummary.totalRevenue.toLocaleString()}원</p>
+            </div>
+            <div className="bg-red-50 border border-red-100 rounded-xl px-4 py-3">
+              <p className="text-xs text-red-500 mb-0.5">총 수수료 <span className="text-gray-400">({orderSummary.commissionRate}%)</span></p>
+              <p className="text-lg font-bold text-red-600">{orderSummary.totalCommission.toLocaleString()}원</p>
+              <div className="text-xs text-gray-400 mt-0.5 space-y-0.5">
+                <div>판매수수료 {orderSummary.totalSaleComm.toLocaleString()}</div>
+                <div>결제수수료 {orderSummary.totalPayComm.toLocaleString()}</div>
+              </div>
             </div>
             <div className="bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3">
               <p className="text-xs text-indigo-600 mb-0.5">정산 예정금</p>
               <p className="text-lg font-bold text-indigo-700">
                 {orderSummary.totalSettlement > 0 ? `${orderSummary.totalSettlement.toLocaleString()}원` : '—'}
               </p>
+            </div>
+            <div className="bg-orange-50 border border-orange-100 rounded-xl px-4 py-3">
+              <p className="text-xs text-orange-500 mb-0.5">수수료 차감 후</p>
+              <p className="text-lg font-bold text-orange-700">
+                {(orderSummary.totalRevenue - orderSummary.totalCommission).toLocaleString()}원
+              </p>
+              {orderSummary.totalRevenue > 0 && (
+                <p className="text-xs text-gray-400 mt-0.5">실수령 {Math.round((1 - orderSummary.totalCommission / orderSummary.totalRevenue) * 100)}%</p>
+              )}
             </div>
             <div className="bg-sky-50 border border-sky-100 rounded-xl px-4 py-3">
               <p className="text-xs text-sky-600 mb-0.5">배송 추적 가능</p>
@@ -682,10 +730,10 @@ export default function ChannelSalesPage() {
           ) : filteredOrders.length === 0 ? (
             <div className="py-12 text-center text-sm text-gray-400">주문 내역이 없습니다</div>
           ) : (
-            <table className="w-full text-sm min-w-[1100px]">
+            <table className="w-full text-sm min-w-[1200px]">
               <thead className="bg-gray-50 text-gray-500 text-xs">
                 <tr>
-                  {['주문일', '주문번호', '상품명/옵션', '수량', '결제금액', '정산예정', '주문자', '수신자', '배송추적', '상태'].map(h => (
+                  {['주문일', '주문번호', '상품명/옵션', '수량', '결제금액', '수수료', '정산예정', '유입경로', '주문자', '수신자', '배송추적', '상태'].map(h => (
                     <th key={h} className="px-3 py-3 text-left font-medium whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -698,15 +746,26 @@ export default function ChannelSalesPage() {
                   const settlement = o.expectedSettlementAmount ?? 0
                   const trackUrl = hasTracking ? getTrackingUrl(o.deliveryCompany, o.trackingNumber) : ''
                   const carrierName = hasTracking ? getCarrierName(o.deliveryCompany) : ''
+                  const saleComm = o.saleCommission ?? 0
+                  const payComm = o.paymentCommission ?? 0
+                  const totalComm = saleComm + payComm
+                  const isNaverShopping = o.inflowPath === 'NAVER_SHOPPING'
+                  const commRate = o.totalPaymentAmount > 0 ? Math.round(totalComm / o.totalPaymentAmount * 100 * 10) / 10 : 0
                   return (
                     <tr key={o.productOrderId} className="hover:bg-gray-50">
                       <td className="px-3 py-2.5 text-xs text-gray-500 font-mono whitespace-nowrap">{date.slice(0, 10)}</td>
                       <td className="px-3 py-2.5 text-xs text-gray-400 font-mono whitespace-nowrap">{o.productOrderId}</td>
                       <td className="px-3 py-2.5 max-w-[200px]">
-                        <div className="font-medium text-gray-800 text-xs line-clamp-1" title={o.productName}>{o.productName}</div>
-                        {o.productOption && (
-                          <div className="text-gray-400 text-xs truncate mt-0.5" title={o.productOption}>{o.productOption}</div>
-                        )}
+                        <button
+                          onClick={() => setProductDetailName(o.productName)}
+                          className="text-left hover:text-blue-600 transition-colors"
+                          title="상품 상세 보기"
+                        >
+                          <div className="font-medium text-gray-800 text-xs line-clamp-1 hover:underline">{o.productName}</div>
+                          {o.productOption && (
+                            <div className="text-gray-400 text-xs truncate mt-0.5">{o.productOption}</div>
+                          )}
+                        </button>
                       </td>
                       <td className="px-3 py-2.5 text-center text-gray-600 text-xs">{o.quantity}</td>
                       <td className="px-3 py-2.5 font-semibold text-green-600 text-xs whitespace-nowrap">
@@ -716,9 +775,29 @@ export default function ChannelSalesPage() {
                         )}
                       </td>
                       <td className="px-3 py-2.5 text-xs whitespace-nowrap">
+                        {totalComm > 0 ? (
+                          <div>
+                            <span className="text-red-500 font-medium">-{totalComm.toLocaleString()}원</span>
+                            <span className="text-gray-400 ml-1">({commRate}%)</span>
+                            <div className="text-gray-400 mt-0.5 space-y-0.5">
+                              {saleComm > 0 && <div>판매 {saleComm.toLocaleString()}</div>}
+                              {payComm > 0 && <div>결제 {payComm.toLocaleString()}</div>}
+                            </div>
+                          </div>
+                        ) : <span className="text-gray-300">—</span>}
+                      </td>
+                      <td className="px-3 py-2.5 text-xs whitespace-nowrap">
                         {settlement > 0
                           ? <span className="text-indigo-600 font-medium">{settlement.toLocaleString()}원</span>
                           : <span className="text-gray-300">—</span>
+                        }
+                      </td>
+                      <td className="px-3 py-2.5 text-xs whitespace-nowrap">
+                        {isNaverShopping
+                          ? <span className="px-1.5 py-0.5 rounded-full bg-green-100 text-green-700">쇼핑유입</span>
+                          : o.inflowPath
+                            ? <span className="px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-500">직접유입</span>
+                            : <span className="text-gray-300">—</span>
                         }
                       </td>
                       <td className="px-3 py-2.5 text-xs text-gray-600 whitespace-nowrap">{o.ordererName}</td>
@@ -1111,6 +1190,12 @@ export default function ChannelSalesPage() {
           </div>
         )}
       </div>
+
+      <ProductDetailModal
+        open={!!productDetailName}
+        productName={productDetailName}
+        onClose={() => setProductDetailName(null)}
+      />
     </div>
   )
 }

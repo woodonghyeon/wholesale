@@ -59,11 +59,16 @@ export async function sendTelegram(text: string): Promise<void> {
 }
 
 /** 신규 주문 알림 (전체 목록, 자동 분할 전송은 sendTelegram에서 처리) */
-export function buildOrderAlert(count: number, orders: { productName: string; totalPaymentAmount: number; ordererName: string }[]): string {
+export function buildOrderAlert(
+  count: number,
+  orders: { productName: string; totalPaymentAmount: number; ordererName: string; productOption?: string; quantity?: number }[]
+): string {
   const total = orders.reduce((s, o) => s + o.totalPaymentAmount, 0)
-  const lines = orders.map(o =>
-    `• ${o.productName} — ${o.totalPaymentAmount.toLocaleString()}원 (${o.ordererName})`
-  )
+  const lines = orders.map(o => {
+    const option = o.productOption ? ` / ${o.productOption}` : ''
+    const qty = o.quantity && o.quantity > 1 ? ` × ${o.quantity}개` : ''
+    return `• ${o.productName}${option}${qty} — ${o.totalPaymentAmount.toLocaleString()}원 (${o.ordererName})`
+  })
   return [
     `🛒 <b>네이버 신규 주문 ${count}건</b>`,
     `💰 합계: <b>${total.toLocaleString()}원</b>`,

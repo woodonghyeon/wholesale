@@ -5,18 +5,43 @@ import { toast } from 'sonner'
 import PageHeader from '@/components/ui/PageHeader'
 import Modal from '@/components/ui/Modal'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import { SortableHeader, useSortable } from '@/components/ui/SortableHeader'
 import { getBusinesses } from '@/lib/supabase/businesses'
 import { Business } from '@/lib/types'
 import { formatDate } from '@/lib/utils/format'
 
 const CARRIER_URLS: Record<string, string> = {
   'CJ대한통운': 'https://trace.cjlogistics.com/next/tracking.html?wblNo=',
-  '우체국': 'https://service.epost.go.kr/trace.RetrieveEmsRigiTraceList.comm?sid1=',
-  '롯데택배': 'https://www.lotteglogis.com/home/reservation/tracking/linkView?InvNo=',
-  '한진택배': 'https://www.hanjin.com/kor/CMS/DeliveryMgr/WaybillResult.do?mCode=MN038&schLang=KR&wbl_num=',
-  '로젠택배': 'https://www.ilogen.com/web/personal/trace/',
-  '직접배송': '',
-  '기타': '',
+  '우체국':     'https://service.epost.go.kr/trace.RetrieveEmsRigiTraceList.comm?sid1=',
+  '롯데택배':   'https://www.lotteglogis.com/home/reservation/tracking/linkView?InvNo=',
+  '한진택배':   'https://www.hanjin.com/kor/CMS/DeliveryMgr/WaybillResult.do?mCode=MN038&schLang=KR&wbl_num=',
+  '로젠택배':   'https://www.ilogen.com/web/personal/trace/',
+  '현대택배':   'https://hyundaitransco.com/delivery/tracking?trackingNo=',
+  '경동택배':   'https://kdexp.com/newDeliverySearch.ekd?barcode=',
+  '천일택배':   'https://www.chunil.co.kr/HTrace/HTrace.jsp?transNo=',
+  '직접배송':   '',
+  '기타':       '',
+  // Naver 원본 코드가 그대로 저장된 레거시 데이터 대응
+  'HYUNDAI':          'https://hyundaitransco.com/delivery/tracking?trackingNo=',
+  'HYUNDAILOGIS':     'https://hyundaitransco.com/delivery/tracking?trackingNo=',
+  'HDEXP':            'https://hyundaitransco.com/delivery/tracking?trackingNo=',
+  'CJGLS':            'https://trace.cjlogistics.com/next/tracking.html?wblNo=',
+  'HANJIN':           'https://www.hanjin.com/kor/CMS/DeliveryMgr/WaybillResult.do?mCode=MN038&schLang=KR&wbl_num=',
+  'LOTTE':            'https://www.lotteglogis.com/home/reservation/tracking/linkView?InvNo=',
+  'LTCGIS':           'https://www.lotteglogis.com/home/reservation/tracking/linkView?InvNo=',
+}
+
+// 화면에 표시할 이름 (Naver 코드 → 한국어)
+const CARRIER_DISPLAY: Record<string, string> = {
+  HYUNDAI:      '현대택배', HYUNDAILOGIS: '현대택배', HDEXP:  '현대택배',
+  CJGLS:        'CJ대한통운', CJLGST: 'CJ대한통운',
+  HANJIN:       '한진택배',
+  LOTTE:        '롯데택배',  LTCGIS: '롯데택배',
+  EPOST:        '우체국',
+  LOGEN:        '로젠택배',
+  KDEXP:        '경동택배',
+  CHUNIL:       '천일택배',
+  DONGBU:       '한덱스',
 }
 
 const CARRIERS = Object.keys(CARRIER_URLS)
@@ -76,6 +101,7 @@ export default function ShippingPage() {
   const [editId, setEditId] = useState<string | null>(null)
   const [form, setForm] = useState(emptyForm())
   const [confirmId, setConfirmId] = useState<string | null>(null)
+  const [syncLoading, setSyncLoading] = useState(false)
 
   useEffect(() => { getBusinesses().then(setBusinesses) }, [])
   useEffect(() => { load() }, [bizFilter, statusFilter, from, to])
@@ -100,9 +126,12 @@ export default function ShippingPage() {
       l.tracking_no.toLowerCase().includes(q) ||
       l.recipient_name?.toLowerCase().includes(q) ||
       l.product_name?.toLowerCase().includes(q) ||
-      l.carrier.toLowerCase().includes(q)
+      l.carrier.toLowerCase().includes(q) ||
+      (CARRIER_DISPLAY[l.carrier] ?? '').toLowerCase().includes(q)
     )
   }, [labels, search])
+
+  const { sorted: sortedLabels, criteria, toggle } = useSortable(filtered)
 
   function openNew() {
     setEditId(null)
@@ -151,6 +180,30 @@ export default function ShippingPage() {
     } catch (e: unknown) { toast.error((e as Error).message) }
   }
 
+  async function handleNaverSync() {
+    const businessId = bizFilter !== 'all' ? bizFilter : businesses[0]?.id
+    if (!businessId) return toast.error('사업자를 선택해주세요')
+    setSyncLoading(true)
+    try {
+      const res = await fetch('/api/naver/sync/shipping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days: 30, business_id: businessId }),
+      })
+      const data = await res.json()
+      if (!data.success) throw new Error(data.error ?? '동기화 실패')
+      const msg = data.synced > 0 || data.updated > 0
+        ? `신규 ${data.synced}건 등록, 상태 ${data.updated}건 업데이트`
+        : data.message ?? '새로 동기화할 송장이 없습니다'
+      toast.success(msg)
+      if (data.synced > 0 || data.updated > 0) load()
+    } catch (e: unknown) {
+      toast.error((e as Error).message)
+    } finally {
+      setSyncLoading(false)
+    }
+  }
+
   async function handleDelete() {
     if (!confirmId) return
     await fetch(`/api/shipping?id=${confirmId}`, { method: 'DELETE' })
@@ -179,9 +232,19 @@ export default function ShippingPage() {
         title="송장 관리"
         description="택배 송장번호 등록 및 배송 현황 관리"
         action={
-          <button onClick={openNew} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
-            + 송장 등록
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={handleNaverSync}
+              disabled={syncLoading}
+              className="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50"
+            >
+              <span className="w-4 h-4 bg-white/30 rounded text-xs font-bold flex items-center justify-center">N</span>
+              {syncLoading ? '동기화 중...' : '네이버 송장 가져오기'}
+            </button>
+            <button onClick={openNew} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
+              + 직접 등록
+            </button>
+          </div>
         }
       />
 
@@ -227,23 +290,28 @@ export default function ShippingPage() {
           <div className="py-16 text-center text-sm text-gray-400">불러오는 중...</div>
         ) : (
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-gray-500 text-xs">
+            <thead className="bg-gray-50 text-xs">
               <tr>
-                {['출고일', '택배사', '송장번호', '수령인', '상품', '상태', ''].map(h => (
-                  <th key={h} className="px-4 py-3 text-left font-medium">{h}</th>
-                ))}
+                <SortableHeader field="shipped_at" criteria={criteria} onSort={toggle}>출고일</SortableHeader>
+                <SortableHeader field="carrier"    criteria={criteria} onSort={toggle}>택배사</SortableHeader>
+                <SortableHeader field="tracking_no" criteria={criteria} onSort={toggle}>송장번호</SortableHeader>
+                <SortableHeader field="recipient_name" criteria={criteria} onSort={toggle}>수령인</SortableHeader>
+                <SortableHeader field="product_name" criteria={criteria} onSort={toggle}>상품</SortableHeader>
+                <SortableHeader field="status" criteria={criteria} onSort={toggle}>상태</SortableHeader>
+                <th className="px-3 py-3"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {filtered.length === 0 && (
+              {sortedLabels.length === 0 && (
                 <tr><td colSpan={7} className="px-4 py-12 text-center text-gray-400">송장이 없습니다</td></tr>
               )}
-              {filtered.map(l => {
-                const tUrl = trackingUrl(l.carrier, l.tracking_no)
+              {sortedLabels.map(l => {
+                const displayCarrier = CARRIER_DISPLAY[l.carrier] ?? l.carrier
+                const tUrl = trackingUrl(displayCarrier, l.tracking_no) || trackingUrl(l.carrier, l.tracking_no)
                 return (
                   <tr key={l.id} className="hover:bg-gray-50 group">
                     <td className="px-4 py-3 text-gray-500 text-xs font-mono">{l.shipped_at ?? '-'}</td>
-                    <td className="px-4 py-3 text-gray-600">{l.carrier}</td>
+                    <td className="px-4 py-3 text-gray-600">{displayCarrier}</td>
                     <td className="px-4 py-3 font-mono text-xs">
                       {tUrl ? (
                         <a href={tUrl} target="_blank" rel="noreferrer"

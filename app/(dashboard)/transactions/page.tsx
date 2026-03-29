@@ -13,6 +13,8 @@ import { getChannels } from '@/lib/supabase/channels'
 import { getProducts } from '@/lib/supabase/products'
 import { Business, Partner, Warehouse, Channel, Product, SlipType, SlipItem } from '@/lib/types'
 import { formatMoney, formatDate } from '@/lib/utils/format'
+import ProductDetailModal from '@/components/ui/ProductDetailModal'
+import { SortableHeader, useSortable } from '@/components/ui/SortableHeader'
 
 type Tab = 'sale' | 'purchase'
 
@@ -49,6 +51,7 @@ export default function TransactionsPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [confirmId, setConfirmId] = useState<string | null>(null)
   const [detailSlip, setDetailSlip] = useState<SlipWithItems | null>(null)
+  const [productDetail, setProductDetail] = useState<{ id?: string; name?: string } | null>(null)
 
   // 전표 작성 상태
   const [draft, setDraft] = useState<{
@@ -182,6 +185,7 @@ export default function TransactionsPage() {
 
   const totalSales = slips.reduce((s, sl) => s + sl.total_amount, 0)
   const PAYMENT_LABEL = { cash: '현금', credit: '외상', mixed: '혼합' }
+  const { sorted: sortedSlips, criteria, toggle } = useSortable(slips)
 
   return (
     <div>
@@ -228,18 +232,24 @@ export default function TransactionsPage() {
           <div className="py-16 text-center text-sm text-gray-400">불러오는 중...</div>
         ) : (
           <table className="w-full text-sm">
-            <thead className="bg-gray-50 text-gray-500 text-xs">
+            <thead className="bg-gray-50 text-xs">
               <tr>
-                {['날짜','거래처','창고','결제','공급가','부가세','합계','메모',''].map(h => (
-                  <th key={h} className="px-4 py-3 text-left font-medium">{h}</th>
-                ))}
+                <SortableHeader field="slip_date"     criteria={criteria} onSort={toggle}>날짜</SortableHeader>
+                <SortableHeader field="partner_name"  criteria={criteria} onSort={toggle}>거래처</SortableHeader>
+                <SortableHeader field="warehouse_name" criteria={criteria} onSort={toggle}>창고</SortableHeader>
+                <SortableHeader field="payment_type"  criteria={criteria} onSort={toggle}>결제</SortableHeader>
+                <SortableHeader field="supply_amount" criteria={criteria} onSort={toggle}>공급가</SortableHeader>
+                <SortableHeader field="tax_amount"    criteria={criteria} onSort={toggle}>부가세</SortableHeader>
+                <SortableHeader field="total_amount"  criteria={criteria} onSort={toggle}>합계</SortableHeader>
+                <th className="px-4 py-3 text-left text-gray-500 font-medium">메모</th>
+                <th className="px-4 py-3"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {slips.length === 0 && (
+              {sortedSlips.length === 0 && (
                 <tr><td colSpan={9} className="px-4 py-12 text-center text-gray-400">전표가 없습니다</td></tr>
               )}
-              {slips.map(sl => (
+              {sortedSlips.map(sl => (
                 <tr key={sl.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setDetailSlip(sl)}>
                   <td className="px-4 py-3 font-mono text-xs text-gray-600">{sl.slip_date}</td>
                   <td className="px-4 py-3 font-medium">{sl.partner_name ?? '-'}</td>
@@ -415,7 +425,16 @@ export default function TransactionsPage() {
               <tbody className="divide-y divide-gray-50">
                 {detailSlip.items.map(item => (
                   <tr key={item.id}>
-                    <td className="px-3 py-2">{item.product_name ?? '-'}</td>
+                    <td className="px-3 py-2">
+                      {item.product_name ? (
+                        <button
+                          onClick={() => setProductDetail({ id: item.product_id ?? undefined, name: item.product_name ?? undefined })}
+                          className="hover:text-blue-600 hover:underline text-left"
+                        >
+                          {item.product_name}
+                        </button>
+                      ) : '-'}
+                    </td>
                     <td className="px-3 py-2">{item.quantity}</td>
                     <td className="px-3 py-2">{formatMoney(item.unit_price)}원</td>
                     <td className="px-3 py-2">{formatMoney(item.supply_amount ?? 0)}원</td>
@@ -435,6 +454,12 @@ export default function TransactionsPage() {
       </Modal>
 
       <ConfirmDialog open={!!confirmId} message="전표를 삭제하시겠습니까? 관련 재고도 함께 반영됩니다." onConfirm={handleDelete} onCancel={() => setConfirmId(null)} />
+      <ProductDetailModal
+        open={!!productDetail}
+        productId={productDetail?.id}
+        productName={productDetail?.name}
+        onClose={() => setProductDetail(null)}
+      />
     </div>
   )
 }

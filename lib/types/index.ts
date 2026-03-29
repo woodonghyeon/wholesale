@@ -96,6 +96,7 @@ export interface Product {
   min_stock: number
   is_bundle: boolean
   note: string | null
+  image_url: string | null
   created_at: string
 }
 
@@ -326,6 +327,21 @@ export interface Return {
   restock_done: boolean
   ref_slip_id: string | null
   note: string | null
+  // 주문자 정보
+  orderer_name: string | null
+  orderer_tel: string | null
+  product_option: string | null
+  unit_price: number | null
+  // 결제 정보
+  payment_method: string | null
+  payment_amount: number | null
+  naver_order_id: string | null
+  // 환불 정보
+  refund_bank: string | null
+  refund_account: string | null
+  refund_holder: string | null
+  refund_amount: number | null
+  refund_done: boolean
   created_at: string
 }
 

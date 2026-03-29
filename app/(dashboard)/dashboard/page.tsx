@@ -7,6 +7,7 @@ import { getDashboardStats, DashboardStats } from '@/lib/supabase/dashboard'
 import { getBusinesses } from '@/lib/supabase/businesses'
 import { Business } from '@/lib/types'
 import { formatMoney } from '@/lib/utils/format'
+import ProductDetailModal from '@/components/ui/ProductDetailModal'
 
 function StatCard({ label, value, sub, accent }: { label: string; value: string; sub?: string; accent?: 'green' | 'red' | 'orange' | 'blue' }) {
   const colors = {
@@ -76,6 +77,7 @@ export default function DashboardPage() {
   const [naverStats, setNaverStats] = useState<NaverStats | null>(null)
   const [naverLoading, setNaverLoading] = useState(true)
   const [urgentStocks, setUrgentStocks] = useState<StockVelocityItem[]>([])
+  const [productDetailName, setProductDetailName] = useState<string | null>(null)
 
   useEffect(() => {
     getBusinesses().then(setBusinesses).catch(() => {})
@@ -349,7 +351,9 @@ export default function DashboardPage() {
                       return (
                         <tr key={o.productOrderId} className="hover:bg-gray-50">
                           <td className="px-4 py-2.5 text-gray-400 font-mono">{o.orderDate.slice(5, 10)}</td>
-                          <td className="px-4 py-2.5 font-medium text-gray-700 max-w-[200px] truncate">{o.productName}</td>
+                          <td className="px-4 py-2.5 max-w-[200px]">
+                            <button onClick={() => setProductDetailName(o.productName)} className="font-medium text-gray-700 truncate hover:text-blue-600 hover:underline text-left w-full" title="상품 상세 보기">{o.productName}</button>
+                          </td>
                           <td className="px-4 py-2.5 text-gray-500">{o.ordererName}</td>
                           <td className="px-4 py-2.5 font-medium text-green-600">{o.totalPaymentAmount.toLocaleString()}원</td>
                           <td className="px-4 py-2.5">
@@ -400,6 +404,12 @@ export default function DashboardPage() {
           </div>
         </div>
       ) : null}
+
+      <ProductDetailModal
+        open={!!productDetailName}
+        productName={productDetailName}
+        onClose={() => setProductDetailName(null)}
+      />
     </div>
   )
 }

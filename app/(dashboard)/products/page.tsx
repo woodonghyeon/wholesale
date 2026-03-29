@@ -5,6 +5,8 @@ import { toast } from 'sonner'
 import PageHeader from '@/components/ui/PageHeader'
 import Modal from '@/components/ui/Modal'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import ImagePickerModal from '@/components/ui/ImagePickerModal'
+import { SortableHeader, useSortable } from '@/components/ui/SortableHeader'
 import { getProducts, upsertProduct, deleteProduct, mergeDuplicateProducts } from '@/lib/supabase/products'
 import { getBusinesses } from '@/lib/supabase/businesses'
 import { Product, Business } from '@/lib/types'
@@ -49,6 +51,11 @@ export default function ProductsPage() {
   const [pageSize, setPageSize] = useState(50)
   const [page, setPage] = useState(1)
   const [merging, setMerging] = useState(false)
+  const [fetchingImages, setFetchingImages] = useState(false)
+  const [fetchImageResult, setFetchImageResult] = useState<{ total: number; updated: number; failed: number } | null>(null)
+
+  // 이미지 피커
+  const [pickerTarget, setPickerTarget] = useState<Product | null>(null)
 
   useEffect(() => { loadAll() }, [])
 
@@ -72,6 +79,28 @@ export default function ProductsPage() {
       setModalOpen(false); setEditItem({})
       setProducts(await getProducts())
     } catch (e: unknown) { toast.error((e as Error).message) }
+  }
+
+  async function handleImagePicked(product: Product, url: string) {
+    try {
+      await upsertProduct({ ...product, image_url: url || null })
+      setProducts(prev => prev.map(p => p.id === product.id ? { ...p, image_url: url || null } : p))
+      toast.success(url ? '이미지가 저장되었습니다' : '이미지가 제거되었습니다')
+    } catch (e: unknown) { toast.error((e as Error).message) }
+  }
+
+  async function handleFetchImages() {
+    setFetchingImages(true)
+    setFetchImageResult(null)
+    try {
+      const res = await fetch('/api/products/fetch-images', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setFetchImageResult({ total: data.total, updated: data.updated, failed: data.failed })
+      toast.success(`이미지 수집 완료: ${data.updated}개 성공, ${data.failed}개 실패`)
+      setProducts(await getProducts())
+    } catch (e: unknown) { toast.error((e as Error).message) }
+    finally { setFetchingImages(false) }
   }
 
   async function handleMergeDuplicates() {
@@ -104,8 +133,10 @@ export default function ProductsPage() {
     return matchBiz && matchSearch
   }), [products, bizFilter, search])
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
-  const paginated = filtered.slice((page - 1) * pageSize, page * pageSize)
+  const { sorted: sortedProducts, criteria: sortCriteria, toggle: sortToggle } = useSortable(filtered)
+
+  const totalPages = Math.max(1, Math.ceil(sortedProducts.length / pageSize))
+  const paginated = sortedProducts.slice((page - 1) * pageSize, page * pageSize)
   const bizName = (id: string | null) => businesses.find(b => b.id === id)?.name ?? '-'
 
   function openEdit(p: Partial<Product>) { setEditItem(p); setModalOpen(true) }
@@ -132,6 +163,22 @@ export default function ProductsPage() {
         description={`총 ${filtered.length}개${filtered.length !== products.length ? ` (전체 ${products.length}개)` : ''}`}
         action={
           <div className="flex gap-2">
+            <button
+              onClick={handleFetchImages}
+              disabled={fetchingImages}
+              title={fetchImageResult ? `총 ${fetchImageResult.total}개 중 ${fetchImageResult.updated}개 성공` : '이미지 없는 상품에 네이버 이미지 자동 수집'}
+              className="px-4 py-2 bg-green-50 text-green-700 text-sm rounded-lg hover:bg-green-100 border border-green-200 disabled:opacity-50 flex items-center gap-1.5"
+            >
+              {fetchingImages ? (
+                <>
+                  <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+                  </svg>
+                  수집 중...
+                </>
+              ) : '🖼️ 이미지 자동 수집'}
+            </button>
             <button
               onClick={handleMergeDuplicates}
               disabled={merging}
@@ -216,14 +263,37 @@ export default function ProductsPage() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-500 text-xs">
               <tr>
-                {['바코드', '상품명', '카테고리', '단위', '매입가', '판매가', '안전재고', '사업자', ''].map(h => (
-                  <th key={h} className="px-4 py-3 text-left font-medium">{h}</th>
-                ))}
+                <th className="px-4 py-3 w-10" />
+                <SortableHeader field="barcode"    criteria={sortCriteria} onSort={sortToggle}>바코드</SortableHeader>
+                <SortableHeader field="name"       criteria={sortCriteria} onSort={sortToggle}>상품명</SortableHeader>
+                <SortableHeader field="category"   criteria={sortCriteria} onSort={sortToggle}>카테고리</SortableHeader>
+                <SortableHeader field="unit"       criteria={sortCriteria} onSort={sortToggle}>단위</SortableHeader>
+                <SortableHeader field="buy_price"  criteria={sortCriteria} onSort={sortToggle} align="right">매입가</SortableHeader>
+                <SortableHeader field="sell_price" criteria={sortCriteria} onSort={sortToggle} align="right">판매가</SortableHeader>
+                <SortableHeader field="min_stock"  criteria={sortCriteria} onSort={sortToggle} align="right">안전재고</SortableHeader>
+                <SortableHeader field="business_id" criteria={sortCriteria} onSort={sortToggle}>사업자</SortableHeader>
+                <th className="px-4 py-3 w-20" />
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
               {paginated.map(p => (
                 <tr key={p.id} className="hover:bg-gray-50 group">
+                  {/* 이미지 썸네일 — 클릭 시 피커 */}
+                  <td className="pl-3 pr-1 py-2 w-10">
+                    <button onClick={() => setPickerTarget(p)} title="이미지 변경" className="group/img relative block">
+                      {p.image_url ? (
+                        <img src={p.image_url} alt={p.name}
+                          className="w-9 h-9 object-contain rounded-lg border border-gray-100 bg-gray-50 group-hover/img:opacity-70 transition-opacity" />
+                      ) : (
+                        <div className="w-9 h-9 rounded-lg bg-gray-50 border border-gray-100 flex items-center justify-center text-gray-300 text-lg group-hover/img:bg-blue-50 group-hover/img:border-blue-200 transition-colors">
+                          +
+                        </div>
+                      )}
+                      <div className="absolute inset-0 rounded-lg flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity">
+                        <span className="text-[9px] bg-black/50 text-white rounded px-1 py-0.5">변경</span>
+                      </div>
+                    </button>
+                  </td>
                   <td className="px-4 py-3 text-gray-400 font-mono text-xs">{p.barcode ?? '-'}</td>
                   <td className="px-4 py-3 font-medium">
                     {p.name}
@@ -256,55 +326,74 @@ export default function ProductsPage() {
         /* ── 카드 뷰 ── */
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
           {paginated.map(p => (
-            <div key={p.id} className="bg-white border border-gray-100 rounded-xl p-4 hover:shadow-md hover:border-blue-100 transition-all group flex flex-col">
-              {/* 카테고리 뱃지 */}
-              <div className="flex items-start justify-between mb-2">
-                <span className={`text-xs px-2 py-0.5 rounded-full ${categoryColor(p.category)}`}>
-                  {p.category ?? '미분류'}
-                </span>
-                {p.is_bundle && <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full">묶음</span>}
-              </div>
-
-              {/* 상품명 */}
-              <p className="text-sm font-medium text-gray-800 leading-snug mb-1 flex-1 line-clamp-2" title={p.name}>
-                {p.name}
-              </p>
-
-              {/* 바코드 */}
-              {p.barcode && (
-                <p className="text-xs text-gray-300 font-mono mb-2 truncate">{p.barcode}</p>
-              )}
-
-              {/* 가격 */}
-              <div className="mt-auto pt-2 border-t border-gray-50">
-                <div className="flex justify-between items-end mb-1">
-                  <span className="text-xs text-gray-400">판매가</span>
-                  <span className="text-sm font-bold text-blue-600">{formatMoney(p.sell_price)}원</span>
+            <div key={p.id} className="bg-white border border-gray-100 rounded-xl overflow-hidden hover:shadow-md hover:border-blue-100 transition-all group flex flex-col">
+              {/* 이미지 영역 — 클릭 시 피커 */}
+              <button onClick={() => setPickerTarget(p)} title="이미지 변경" className="group/img relative w-full h-32 block">
+                {p.image_url ? (
+                  <div className="h-32 bg-gray-50 flex items-center justify-center overflow-hidden">
+                    <img src={p.image_url} alt={p.name}
+                      className="w-full h-full object-contain p-2 group-hover/img:opacity-70 transition-opacity" />
+                  </div>
+                ) : (
+                  <div className="h-32 bg-gray-50 flex items-center justify-center text-gray-300 text-4xl group-hover/img:bg-blue-50 transition-colors">
+                    +
+                  </div>
+                )}
+                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/img:opacity-100 transition-opacity">
+                  <span className="text-xs bg-black/50 text-white rounded-lg px-2 py-1">이미지 변경</span>
                 </div>
-                {p.buy_price > 0 && (
-                  <div className="flex justify-between items-end">
-                    <span className="text-xs text-gray-400">매입가</span>
-                    <span className="text-xs text-gray-500">{formatMoney(p.buy_price)}원</span>
-                  </div>
-                )}
-                {p.min_stock > 0 && (
-                  <div className="flex justify-between items-end mt-0.5">
-                    <span className="text-xs text-gray-400">안전재고</span>
-                    <span className="text-xs text-orange-500 font-medium">{p.min_stock}</span>
-                  </div>
-                )}
-              </div>
+              </button>
 
-              {/* 액션 버튼 */}
-              <div className="flex gap-1.5 mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button onClick={() => openEdit(p)}
-                  className="flex-1 text-xs py-1.5 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50">
-                  수정
-                </button>
-                <button onClick={() => setConfirmId(p.id)}
-                  className="flex-1 text-xs py-1.5 border border-red-200 text-red-500 rounded-lg hover:bg-red-50">
-                  삭제
-                </button>
+              <div className="p-3 flex flex-col flex-1">
+                {/* 카테고리 뱃지 */}
+                <div className="flex items-start justify-between mb-1.5">
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${categoryColor(p.category)}`}>
+                    {p.category ?? '미분류'}
+                  </span>
+                  {p.is_bundle && <span className="text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded-full">묶음</span>}
+                </div>
+
+                {/* 상품명 */}
+                <p className="text-sm font-medium text-gray-800 leading-snug mb-1 flex-1 line-clamp-2" title={p.name}>
+                  {p.name}
+                </p>
+
+                {/* 바코드 */}
+                {p.barcode && (
+                  <p className="text-xs text-gray-300 font-mono mb-2 truncate">{p.barcode}</p>
+                )}
+
+                {/* 가격 */}
+                <div className="pt-2 border-t border-gray-50">
+                  <div className="flex justify-between items-end mb-1">
+                    <span className="text-xs text-gray-400">판매가</span>
+                    <span className="text-sm font-bold text-blue-600">{formatMoney(p.sell_price)}원</span>
+                  </div>
+                  {p.buy_price > 0 && (
+                    <div className="flex justify-between items-end">
+                      <span className="text-xs text-gray-400">매입가</span>
+                      <span className="text-xs text-gray-500">{formatMoney(p.buy_price)}원</span>
+                    </div>
+                  )}
+                  {p.min_stock > 0 && (
+                    <div className="flex justify-between items-end mt-0.5">
+                      <span className="text-xs text-gray-400">안전재고</span>
+                      <span className="text-xs text-orange-500 font-medium">{p.min_stock}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* 액션 버튼 */}
+                <div className="flex gap-1.5 mt-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button onClick={() => openEdit(p)}
+                    className="flex-1 text-xs py-1.5 border border-blue-200 text-blue-600 rounded-lg hover:bg-blue-50">
+                    수정
+                  </button>
+                  <button onClick={() => setConfirmId(p.id)}
+                    className="flex-1 text-xs py-1.5 border border-red-200 text-red-500 rounded-lg hover:bg-red-50">
+                    삭제
+                  </button>
+                </div>
               </div>
             </div>
           ))}
@@ -388,6 +477,18 @@ export default function ProductsPage() {
             <label htmlFor="is_bundle" className="text-sm text-gray-700">묶음 상품</label>
           </div>
           <div>
+            <label className={labelCls}>이미지 URL</label>
+            <div className="flex gap-2 items-start">
+              <input className={inputCls} value={editItem.image_url ?? ''}
+                onChange={e => setEditItem(p => ({ ...p, image_url: e.target.value || null }))}
+                placeholder="https://..." />
+              {editItem.image_url && (
+                <img src={editItem.image_url} alt=""
+                  className="w-14 h-14 object-contain rounded-lg border border-gray-100 bg-gray-50 shrink-0" />
+              )}
+            </div>
+          </div>
+          <div>
             <label className={labelCls}>메모</label>
             <textarea className={inputCls} rows={2} value={editItem.note ?? ''} onChange={e => setEditItem(p => ({ ...p, note: e.target.value }))} />
           </div>
@@ -399,6 +500,14 @@ export default function ProductsPage() {
       </Modal>
 
       <ConfirmDialog open={!!confirmId} message="상품을 삭제하시겠습니까?" onConfirm={handleDelete} onCancel={() => setConfirmId(null)} />
+
+      <ImagePickerModal
+        open={!!pickerTarget}
+        productName={pickerTarget?.name ?? ''}
+        currentImage={pickerTarget?.image_url}
+        onSelect={url => pickerTarget && handleImagePicked(pickerTarget, url)}
+        onClose={() => setPickerTarget(null)}
+      />
     </div>
   )
 }

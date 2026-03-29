@@ -161,6 +161,7 @@ export default function InventoryPage() {
         business_id: scanBizId,
         min_stock: 0,
         is_bundle: false,
+        ...(scanLookup.product?.image ? { image_url: scanLookup.product.image } : {}),
       })
       // 재고 조정
       await adjustInventory({
@@ -418,6 +419,17 @@ export default function InventoryPage() {
               {scanLookup.source === 'naver' && '네이버 쇼핑에서 정보를 가져왔습니다. 확인 후 저장하세요.'}
               {scanLookup.source === 'none' && '등록되지 않은 바코드입니다. 상품 정보를 직접 입력해주세요.'}
             </div>
+
+            {/* 상품 이미지 (네이버 또는 DB) */}
+            {scanLookup.product?.image && (
+              <div className="flex justify-center">
+                <img
+                  src={scanLookup.product.image}
+                  alt={scanProductForm.name}
+                  className="h-28 w-28 object-contain rounded-lg border border-gray-100 bg-gray-50"
+                />
+              </div>
+            )}
 
             {/* 상품 정보 (DB 조회가 아닌 경우 수정 가능) */}
             <div className="grid grid-cols-2 gap-3">

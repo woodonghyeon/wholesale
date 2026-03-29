@@ -58,8 +58,28 @@ export async function adjustInventory(payload: {
   warehouse_id: string
   quantity: number
   note?: string
+  allowNegative?: boolean   // 기본 false — 음수 방지
 }): Promise<void> {
   const supabase = createClient()
+
+  // 출고(음수)일 때 현재 재고 확인 → 음수 방지
+  if (payload.quantity < 0 && !payload.allowNegative) {
+    const { data: current } = await supabase
+      .from('inventory')
+      .select('quantity')
+      .eq('product_id', payload.product_id)
+      .eq('business_id', payload.business_id)
+      .eq('warehouse_id', payload.warehouse_id)
+      .maybeSingle()
+
+    const currentQty = current?.quantity ?? 0
+    if (currentQty + payload.quantity < 0) {
+      throw new Error(
+        `재고 부족: 현재 ${currentQty}개, 출고 요청 ${Math.abs(payload.quantity)}개 (부족 ${Math.abs(currentQty + payload.quantity)}개)`
+      )
+    }
+  }
+
   const { error } = await supabase.rpc('adjust_inventory', {
     p_product_id: payload.product_id,
     p_business_id: payload.business_id,

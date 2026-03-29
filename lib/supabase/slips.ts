@@ -1,6 +1,7 @@
 import { createClient } from './client'
 import { Slip, SlipItem, SlipType } from '@/lib/types'
 import { logActivity } from './logs'
+import { adjustInventory } from './inventory'
 
 export interface SlipWithItems extends Slip {
   items: SlipItem[]
@@ -65,6 +66,28 @@ export async function createSlip(
       .from('slip_items')
       .insert(items.map((item, i) => ({ ...item, slip_id: slipData.id, sort_order: i })))
     if (itemErr) throw new Error('품목 저장 실패: ' + itemErr.message)
+  }
+
+  // ── 재고 자동 연동 ──────────────────────────────────
+  // 창고가 지정되고 product_id가 있는 품목에 한해 재고 자동 반영
+  if (slip.warehouse_id) {
+    const adjustItems = items.filter(i => i.product_id)
+    for (const item of adjustItems) {
+      try {
+        // 매출: 출고(-), 매입: 입고(+)
+        const delta = slip.slip_type === 'sale' ? -item.quantity : item.quantity
+        await adjustInventory({
+          product_id:   item.product_id!,
+          business_id:  slip.business_id,
+          warehouse_id: slip.warehouse_id,
+          quantity:     delta,
+          note:         `${slip.slip_type === 'sale' ? '매출' : '매입'} 전표 자동 반영`,
+        })
+      } catch {
+        // 재고 연동 실패는 전표 저장을 막지 않음 (로그만)
+        console.warn(`[Slip] 재고 자동 연동 실패: product_id=${item.product_id}`)
+      }
+    }
   }
 
   logActivity({
