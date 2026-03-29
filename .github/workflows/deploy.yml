@@ -1,9 +1,7 @@
 name: Deploy to GCP
 
 on:
-  push:
-    branches: [main]
-  workflow_dispatch:  # 수동 배포 버튼 활성화
+  workflow_dispatch:  # 수동 배포만 허용
 
 jobs:
   deploy:
