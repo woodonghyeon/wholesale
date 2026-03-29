@@ -1,7 +1,11 @@
-import { NextResponse } from 'next/server'
+export const dynamic = 'force-dynamic'
+
+import { NextRequest, NextResponse } from 'next/server'
 import { getNaverOrders, getNaverOrdersLastHours } from '@/lib/naver/orders'
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  const businessId = req.nextUrl.searchParams.get('business_id') ?? undefined
+
   try {
     /**
      * Naver 주문 API 특성:
@@ -13,9 +17,9 @@ export async function GET() {
      *   ③ 최근 30일   → 월간 통계용
      */
     const [today, week, month] = await Promise.all([
-      getNaverOrdersLastHours(24),
-      getNaverOrders(7),
-      getNaverOrders(30),
+      getNaverOrdersLastHours(24, businessId),
+      getNaverOrders(7, businessId),
+      getNaverOrders(30, businessId),
     ])
 
     // 중복 제거 — 최신(짧은 창) 데이터 우선

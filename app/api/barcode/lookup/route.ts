@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/client'
 
@@ -24,7 +26,7 @@ export async function GET(req: NextRequest) {
   const supabase = createClient()
   const { data: dbProduct } = await supabase
     .from('products')
-    .select('id, name, barcode, category, buy_price, sell_price, unit')
+    .select('id, name, barcode, category, buy_price, sell_price, unit, image_url')
     .eq('barcode', barcode)
     .maybeSingle()
 
@@ -32,7 +34,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       found: true,
       source: 'db',
-      product: dbProduct,
+      product: { ...dbProduct, image: dbProduct.image_url ?? undefined },
     } satisfies BarcodeLookupResult)
   }
 

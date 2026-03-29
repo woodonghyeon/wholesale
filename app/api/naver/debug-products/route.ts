@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { NextResponse } from 'next/server'
 import { getNaverAuthHeaders, BASE_URL } from '@/lib/naver/auth'
 

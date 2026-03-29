@@ -1,3 +1,5 @@
+export const dynamic = 'force-dynamic'
+
 import { NextRequest, NextResponse } from 'next/server'
 import { getNaverOrders, getNaverOrdersLastHours } from '@/lib/naver/orders'
 
@@ -30,13 +32,14 @@ function parseInflowLabel(raw: string): string {
  * 정산 분석 / 옵션 분석 / 유입경로 / 결제수단 통계
  */
 export async function GET(req: NextRequest) {
-  const days = Number(req.nextUrl.searchParams.get('days') ?? '30')
+  const days       = Number(req.nextUrl.searchParams.get('days') ?? '30')
+  const businessId = req.nextUrl.searchParams.get('business_id') ?? undefined
 
   try {
     // 오늘 신규 + N일 중복 제거
     const [recent, older] = await Promise.all([
-      getNaverOrdersLastHours(24),
-      getNaverOrders(days),
+      getNaverOrdersLastHours(24, businessId),
+      getNaverOrders(days, businessId),
     ])
     const orderMap = new Map(older.map(o => [o.productOrderId, o]))
     recent.forEach(o => orderMap.set(o.productOrderId, o))
