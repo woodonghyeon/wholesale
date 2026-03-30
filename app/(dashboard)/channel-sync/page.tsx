@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { toast } from 'sonner'
 import PageHeader from '@/components/ui/PageHeader'
 import Modal from '@/components/ui/Modal'
@@ -44,7 +44,9 @@ interface LocalProduct {
   sell_price: number
 }
 
-// ── 유틸 ──────────────────────────────────────────────────────
+// ── 상수 ──────────────────────────────────────────────────────
+const PAGE_SIZE = 20
+
 const PLATFORM_LABELS: Record<string, { label: string; color: string }> = {
   naver:   { label: '네이버 스마트스토어', color: 'bg-green-500' },
   '11st':  { label: '11번가',             color: 'bg-red-500'   },
@@ -54,23 +56,11 @@ const PLATFORM_LABELS: Record<string, { label: string; color: string }> = {
   offline: { label: '오프라인',           color: 'bg-gray-500'  },
 }
 
-function PlatformBadge({ type }: { type: string | null }) {
-  if (!type) return <span className="text-xs text-gray-400">-</span>
-  const info = PLATFORM_LABELS[type]
-  if (!info) return <span className="text-xs text-gray-500">{type}</span>
-  return (
-    <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full text-white ${info.color}`}>
-      {info.label}
-    </span>
-  )
-}
-
+// ── 유틸 컴포넌트 ──────────────────────────────────────────────
 function StatusBadge({ status, error }: { status: string | null; error?: string | null }) {
   if (!status) return <span className="text-xs text-gray-300">미동기화</span>
   if (status === 'success') return <span className="text-xs text-green-600 font-medium">✓ 성공</span>
-  if (status === 'failed')  return (
-    <span className="text-xs text-red-500 font-medium" title={error ?? ''}>✗ 실패</span>
-  )
+  if (status === 'failed')  return <span className="text-xs text-red-500 font-medium" title={error ?? ''}>✗ 실패</span>
   return <span className="text-xs text-yellow-500">⏳ 대기</span>
 }
 
@@ -78,10 +68,10 @@ function formatRelativeTime(iso: string | null) {
   if (!iso) return '-'
   const diff = Date.now() - new Date(iso).getTime()
   const mins = Math.floor(diff / 60000)
-  if (mins < 1)   return '방금 전'
-  if (mins < 60)  return `${mins}분 전`
+  if (mins < 1)  return '방금 전'
+  if (mins < 60) return `${mins}분 전`
   const hrs = Math.floor(mins / 60)
-  if (hrs < 24)   return `${hrs}시간 전`
+  if (hrs < 24)  return `${hrs}시간 전`
   return `${Math.floor(hrs / 24)}일 전`
 }
 
@@ -89,46 +79,42 @@ function formatRelativeTime(iso: string | null) {
 export default function ChannelSyncPage() {
   const { selectedBusinessId } = useBusinessStore()
 
-  const [channels, setChannels]             = useState<Channel[]>([])
+  const [channels, setChannels]                   = useState<Channel[]>([])
   const [selectedChannelId, setSelectedChannelId] = useState<string>('')
-  const [mappings, setMappings]             = useState<MappingRow[]>([])
-  const [loadingMappings, setLoadingMappings] = useState(false)
-  const [bulkSyncing, setBulkSyncing]       = useState(false)
-  const [syncingIds, setSyncingIds]         = useState<Set<string>>(new Set())
+  const [mappings, setMappings]                   = useState<MappingRow[]>([])
+  const [loadingMappings, setLoadingMappings]     = useState(false)
+  const [bulkSyncing, setBulkSyncing]             = useState(false)
+  const [syncingIds, setSyncingIds]               = useState<Set<string>>(new Set())
+
+  // 검색 + 페이지네이션
+  const [search, setSearch] = useState('')
+  const [page, setPage]     = useState(1)
 
   // 채널가격 인라인 편집
-  const [editPriceId, setEditPriceId]       = useState<string | null>(null)
-  const [editPriceVal, setEditPriceVal]     = useState('')
+  const [editPriceId, setEditPriceId]   = useState<string | null>(null)
+  const [editPriceVal, setEditPriceVal] = useState('')
 
   // 플랫폼 상품 불러오기 모달
-  const [importModalOpen, setImportModalOpen] = useState(false)
-  const [platformProducts, setPlatformProducts] = useState<PlatformProduct[]>([])
-  const [localProducts, setLocalProducts]   = useState<LocalProduct[]>([])
-  const [importLoading, setImportLoading]   = useState(false)
-  const [importSearch, setImportSearch]     = useState('')
-  // { platformProductId → localProductId }
-  const [matchMap, setMatchMap]             = useState<Record<string, string>>({})
-  const [savingImport, setSavingImport]     = useState(false)
+  const [importModalOpen, setImportModalOpen]     = useState(false)
+  const [platformProducts, setPlatformProducts]   = useState<PlatformProduct[]>([])
+  const [localProducts, setLocalProducts]         = useState<LocalProduct[]>([])
+  const [importLoading, setImportLoading]         = useState(false)
+  const [importSearch, setImportSearch]           = useState('')
+  const [matchMap, setMatchMap]                   = useState<Record<string, string>>({})
+  const [savingImport, setSavingImport]           = useState(false)
 
   // ── 채널 목록 로드 ──────────────────────────────────────────
   useEffect(() => {
     fetch('/api/channels/list')
       .then(r => r.json())
       .then((data: Channel[]) => {
-        const filtered = data.filter(c => c.platform_type && c.platform_type !== 'offline')
+        const filtered = (Array.isArray(data) ? data : []).filter(
+          c => c.platform_type && c.platform_type !== 'offline'
+        )
         setChannels(filtered)
         if (filtered.length > 0) setSelectedChannelId(filtered[0].id)
       })
-      .catch(() => {
-        // fallback: settings API
-        fetch('/api/settings/channels')
-          .then(r => r.json())
-          .then((data: any[]) => {
-            const filtered = (data ?? []).filter((c: Channel) => c.platform_type && c.platform_type !== 'offline')
-            setChannels(filtered)
-            if (filtered.length > 0) setSelectedChannelId(filtered[0].id)
-          })
-      })
+      .catch(() => toast.error('채널 목록 조회 실패'))
   }, [])
 
   // ── 매핑 목록 로드 ──────────────────────────────────────────
@@ -143,6 +129,7 @@ export default function ChannelSyncPage() {
       const res  = await fetch(`/api/channels/mappings/by-channel?${params}`)
       const data = await res.json()
       setMappings(Array.isArray(data) ? data : [])
+      setPage(1)
     } catch {
       toast.error('매핑 목록 조회 실패')
     } finally {
@@ -151,6 +138,40 @@ export default function ChannelSyncPage() {
   }, [selectedChannelId, selectedBusinessId])
 
   useEffect(() => { loadMappings() }, [loadMappings])
+
+  // 채널 변경 시 검색어·페이지 초기화
+  useEffect(() => { setSearch(''); setPage(1) }, [selectedChannelId])
+
+  // ── 검색 필터 + 페이지네이션 ────────────────────────────────
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return mappings
+    return mappings.filter(m =>
+      m.product_name.toLowerCase().includes(q) ||
+      m.platform_product_id.toLowerCase().includes(q)
+    )
+  }, [mappings, search])
+
+  const totalPages  = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const currentPage = Math.min(page, totalPages)
+  const paged       = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+
+  const pageNumbers = useMemo(() => {
+    const pages: (number | string)[] = []
+    if (totalPages <= 7) {
+      for (let i = 1; i <= totalPages; i++) pages.push(i)
+    } else {
+      pages.push(1)
+      if (currentPage > 3) pages.push('...')
+      for (let i = Math.max(2, currentPage - 1); i <= Math.min(totalPages - 1, currentPage + 1); i++) pages.push(i)
+      if (currentPage < totalPages - 2) pages.push('...')
+      pages.push(totalPages)
+    }
+    return pages
+  }, [currentPage, totalPages])
+
+  // 검색 변경 시 페이지 1로 리셋
+  useEffect(() => { setPage(1) }, [search])
 
   // ── 개별 동기화 ─────────────────────────────────────────────
   async function syncOne(productId: string) {
@@ -199,12 +220,9 @@ export default function ChannelSyncPage() {
   // ── 채널가격 저장 ────────────────────────────────────────────
   async function savePriceEdit(mappingId: string) {
     const price = editPriceVal === '' ? null : parseInt(editPriceVal)
-    if (editPriceVal !== '' && isNaN(price!)) {
-      toast.error('올바른 숫자를 입력하세요')
-      return
-    }
+    if (editPriceVal !== '' && isNaN(price!)) { toast.error('올바른 숫자를 입력하세요'); return }
     try {
-      const res = await fetch('/api/channels/mappings', {
+      const res  = await fetch('/api/channels/mappings', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: mappingId, channel_price: price }),
@@ -265,15 +283,17 @@ export default function ChannelSyncPage() {
       ])
       const platformData = await platformRes.json()
       const productData  = await productRes.json()
-      setPlatformProducts(platformData.products ?? [])
-      setLocalProducts(Array.isArray(productData) ? productData : (productData.data ?? []))
+      const ppList: PlatformProduct[] = platformData.products ?? []
+      const lpList: LocalProduct[]    = Array.isArray(productData) ? productData : (productData.data ?? [])
+      setPlatformProducts(ppList)
+      setLocalProducts(lpList)
 
-      // 이름 기반 자동 매칭 (정확 일치 우선)
+      // 이름 기반 자동 매칭
       const autoMatch: Record<string, string> = {}
-      for (const pp of (platformData.products ?? []) as PlatformProduct[]) {
+      for (const pp of ppList) {
         if (pp.isMapped) continue
-        const matched = (Array.isArray(productData) ? productData : (productData.data ?? [])).find(
-          (lp: LocalProduct) => lp.name === pp.name || lp.name.includes(pp.name) || pp.name.includes(lp.name)
+        const matched = lpList.find(
+          lp => lp.name === pp.name || lp.name.includes(pp.name) || pp.name.includes(lp.name)
         )
         if (matched) autoMatch[pp.platformProductId] = matched.id
       }
@@ -287,12 +307,12 @@ export default function ChannelSyncPage() {
 
   // ── 매핑 일괄 저장 ───────────────────────────────────────────
   async function saveImport() {
-    const toSave = Object.entries(matchMap).filter(([, localId]) => !!localId)
+    const toSave = Object.entries(matchMap).filter(([, id]) => !!id)
     if (!toSave.length) { toast.error('매핑할 항목을 선택하세요'); return }
     setSavingImport(true)
     try {
       const bizId = selectedBusinessId && selectedBusinessId !== 'all' ? selectedBusinessId : undefined
-      const mappings = toSave.map(([platformProductId, productId]) => ({
+      const mappingsToSave = toSave.map(([platformProductId, productId]) => ({
         product_id: productId,
         channel_id: selectedChannelId,
         platform_product_id: platformProductId,
@@ -303,7 +323,7 @@ export default function ChannelSyncPage() {
       const res  = await fetch('/api/channels/mappings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mappings }),
+        body: JSON.stringify({ mappings: mappingsToSave }),
       })
       const data = await res.json()
       if (!data.success) throw new Error(data.error)
@@ -340,7 +360,6 @@ export default function ChannelSyncPage() {
         description="판매 채널별 상품 가격·재고를 동기화합니다"
       />
 
-      {/* 채널 탭 */}
       {channels.length === 0 ? (
         <div className="mt-6 bg-yellow-50 border border-yellow-200 rounded-xl p-6 text-center">
           <p className="text-sm text-yellow-700 font-medium">연동 가능한 채널이 없습니다</p>
@@ -350,7 +369,7 @@ export default function ChannelSyncPage() {
         </div>
       ) : (
         <>
-          {/* 탭 헤더 */}
+          {/* ── 채널 탭 ──────────────────────────────────────── */}
           <div className="flex gap-1 mt-6 border-b border-gray-200">
             {channels.map(ch => {
               const info = PLATFORM_LABELS[ch.platform_type ?? '']
@@ -371,15 +390,35 @@ export default function ChannelSyncPage() {
             })}
           </div>
 
-          {/* 통계 + 액션 바 */}
-          <div className="flex items-center justify-between mt-5">
-            <div className="flex gap-4">
-              <StatChip label="전체" value={stats.total} color="text-gray-700" />
-              <StatChip label="성공" value={stats.success} color="text-green-600" />
-              <StatChip label="실패" value={stats.failed} color="text-red-500" />
+          {/* ── 통계 + 검색 + 액션 바 ────────────────────────── */}
+          <div className="flex items-center justify-between mt-5 gap-3">
+            {/* 좌측: 통계 */}
+            <div className="flex items-center gap-4 shrink-0">
+              <StatChip label="전체"    value={stats.total}     color="text-gray-700" />
+              <StatChip label="성공"    value={stats.success}   color="text-green-600" />
+              <StatChip label="실패"    value={stats.failed}    color="text-red-500" />
               <StatChip label="미동기화" value={stats.notSynced} color="text-gray-400" />
             </div>
-            <div className="flex gap-2">
+
+            {/* 중앙: 검색 */}
+            <div className="relative flex-1 max-w-xs">
+              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+              </svg>
+              <input
+                type="text"
+                placeholder="상품명 또는 플랫폼 ID 검색…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              {search && (
+                <button onClick={() => setSearch('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">✕</button>
+              )}
+            </div>
+
+            {/* 우측: 액션 */}
+            <div className="flex gap-2 shrink-0">
               <button
                 onClick={openImportModal}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-700"
@@ -391,25 +430,30 @@ export default function ChannelSyncPage() {
                 disabled={bulkSyncing || mappings.length === 0}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
               >
-                {bulkSyncing ? (
-                  <><span className="animate-spin">⟳</span> 동기화 중…</>
-                ) : (
-                  <>⟳ 전체 동기화 ({stats.total}개)</>
-                )}
+                {bulkSyncing
+                  ? <><span className="animate-spin inline-block">⟳</span> 동기화 중…</>
+                  : <>⟳ 전체 동기화 ({stats.total}개)</>
+                }
               </button>
             </div>
           </div>
 
-          {/* 매핑 테이블 */}
+          {/* ── 매핑 테이블 ──────────────────────────────────── */}
           <div className="mt-4 bg-white border border-gray-100 rounded-xl overflow-hidden">
             {loadingMappings ? (
               <div className="py-16 text-center text-gray-400 text-sm">로딩 중…</div>
-            ) : mappings.length === 0 ? (
+            ) : filtered.length === 0 ? (
               <div className="py-16 text-center">
-                <p className="text-gray-400 text-sm">매핑된 상품이 없습니다</p>
-                <p className="text-xs text-gray-300 mt-1">
-                  [📥 플랫폼 상품 불러오기]로 일괄 매핑하거나 상품 관리에서 개별 설정하세요
-                </p>
+                {search ? (
+                  <p className="text-gray-400 text-sm">"{search}" 검색 결과가 없습니다</p>
+                ) : (
+                  <>
+                    <p className="text-gray-400 text-sm">매핑된 상품이 없습니다</p>
+                    <p className="text-xs text-gray-300 mt-1">
+                      [📥 플랫폼 상품 불러오기]로 일괄 매핑하거나 상품 관리에서 개별 설정하세요
+                    </p>
+                  </>
+                )}
               </div>
             ) : (
               <table className="w-full text-sm">
@@ -426,16 +470,15 @@ export default function ChannelSyncPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {mappings.map(row => (
+                  {paged.map(row => (
                     <tr key={row.mapping_id} className="hover:bg-gray-50 group">
                       {/* 상품명 */}
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-                          {row.product_image ? (
-                            <img src={row.product_image} alt="" className="w-8 h-8 object-contain rounded bg-gray-50 shrink-0" />
-                          ) : (
-                            <div className="w-8 h-8 bg-gray-100 rounded shrink-0" />
-                          )}
+                          {row.product_image
+                            ? <img src={row.product_image} alt="" className="w-8 h-8 object-contain rounded bg-gray-50 shrink-0" />
+                            : <div className="w-8 h-8 bg-gray-100 rounded shrink-0" />
+                          }
                           <span className="font-medium text-gray-800 truncate max-w-[180px]" title={row.product_name}>
                             {row.product_name}
                           </span>
@@ -447,7 +490,7 @@ export default function ChannelSyncPage() {
                         {row.platform_product_id}
                       </td>
 
-                      {/* 채널 가격 (인라인 편집) */}
+                      {/* 채널 가격 인라인 편집 */}
                       <td className="px-4 py-3">
                         {editPriceId === row.mapping_id ? (
                           <div className="flex items-center gap-1">
@@ -481,18 +524,12 @@ export default function ChannelSyncPage() {
 
                       {/* 가격 동기화 토글 */}
                       <td className="px-4 py-3 text-center">
-                        <Toggle
-                          value={row.sync_price}
-                          onChange={v => toggleFlag(row.mapping_id, 'sync_price', v)}
-                        />
+                        <Toggle value={row.sync_price} onChange={v => toggleFlag(row.mapping_id, 'sync_price', v)} />
                       </td>
 
                       {/* 재고 동기화 토글 */}
                       <td className="px-4 py-3 text-center">
-                        <Toggle
-                          value={row.sync_inventory}
-                          onChange={v => toggleFlag(row.mapping_id, 'sync_inventory', v)}
-                        />
+                        <Toggle value={row.sync_inventory} onChange={v => toggleFlag(row.mapping_id, 'sync_inventory', v)} />
                       </td>
 
                       {/* 마지막 동기화 */}
@@ -529,6 +566,45 @@ export default function ChannelSyncPage() {
               </table>
             )}
           </div>
+
+          {/* ── 페이지네이션 ─────────────────────────────────── */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between mt-4">
+              <p className="text-xs text-gray-400">
+                {((currentPage - 1) * PAGE_SIZE) + 1}–{Math.min(currentPage * PAGE_SIZE, filtered.length)} / 총 {filtered.length}개
+                {search && <span className="ml-1 text-blue-500">(검색: "{search}")</span>}
+              </p>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg disabled:opacity-30 hover:bg-gray-50"
+                >
+                  ‹ 이전
+                </button>
+                {pageNumbers.map((n, i) =>
+                  n === '...'
+                    ? <span key={`dot-${i}`} className="px-1 text-gray-400 text-xs">…</span>
+                    : <button
+                        key={n}
+                        onClick={() => setPage(n as number)}
+                        className={`w-8 h-7 text-xs rounded-lg transition-colors ${
+                          currentPage === n
+                            ? 'bg-blue-600 text-white font-medium'
+                            : 'border border-gray-200 hover:bg-gray-50 text-gray-600'
+                        }`}
+                      >{n}</button>
+                )}
+                <button
+                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  className="px-2.5 py-1.5 text-xs border border-gray-200 rounded-lg disabled:opacity-30 hover:bg-gray-50"
+                >
+                  다음 ›
+                </button>
+              </div>
+            </div>
+          )}
         </>
       )}
 
@@ -545,7 +621,7 @@ export default function ChannelSyncPage() {
           <>
             <div className="flex items-center justify-between mb-4">
               <p className="text-sm text-gray-500">
-                총 <span className="font-medium text-gray-800">{platformProducts.length}</span>개 상품 ·
+                총 <span className="font-medium text-gray-800">{platformProducts.length}</span>개 ·
                 미연동 <span className="font-medium text-blue-600">{unmappedCount}</span>개
               </p>
               <input
@@ -568,13 +644,15 @@ export default function ChannelSyncPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
-                  {filteredImport.map(pp => (
+                  {filteredImport.length === 0 ? (
+                    <tr><td colSpan={4} className="px-3 py-8 text-center text-gray-400 text-sm">
+                      {importSearch ? `"${importSearch}" 검색 결과 없음` : '상품이 없습니다'}
+                    </td></tr>
+                  ) : filteredImport.map(pp => (
                     <tr key={pp.platformProductId} className={pp.isMapped ? 'bg-gray-50 opacity-60' : ''}>
                       <td className="px-3 py-2">
-                        <div>
-                          <p className="font-medium text-gray-800 truncate max-w-[220px]" title={pp.name}>{pp.name}</p>
-                          <p className="text-xs text-gray-400 font-mono">{pp.platformProductId}</p>
-                        </div>
+                        <p className="font-medium text-gray-800 truncate max-w-[220px]" title={pp.name}>{pp.name}</p>
+                        <p className="text-xs text-gray-400 font-mono">{pp.platformProductId}</p>
                       </td>
                       <td className="px-3 py-2 text-gray-600">{formatMoney(pp.price)}원</td>
                       <td className="px-3 py-2">
@@ -594,13 +672,12 @@ export default function ChannelSyncPage() {
                         )}
                       </td>
                       <td className="px-3 py-2 text-center">
-                        {pp.isMapped ? (
-                          <span className="text-xs bg-green-100 text-green-600 px-2 py-0.5 rounded-full">연동됨</span>
-                        ) : matchMap[pp.platformProductId] ? (
-                          <span className="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full">매핑됨</span>
-                        ) : (
-                          <span className="text-xs text-gray-300">-</span>
-                        )}
+                        {pp.isMapped
+                          ? <span className="text-xs bg-green-100 text-green-600 px-2 py-0.5 rounded-full">연동됨</span>
+                          : matchMap[pp.platformProductId]
+                            ? <span className="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full">매핑됨</span>
+                            : <span className="text-xs text-gray-300">-</span>
+                        }
                       </td>
                     </tr>
                   ))}
@@ -609,9 +686,7 @@ export default function ChannelSyncPage() {
             </div>
 
             <div className="flex items-center justify-between mt-4">
-              <p className="text-xs text-gray-400">
-                선택된 매핑: {Object.values(matchMap).filter(Boolean).length}개
-              </p>
+              <p className="text-xs text-gray-400">선택된 매핑: {Object.values(matchMap).filter(Boolean).length}개</p>
               <div className="flex gap-2">
                 <button onClick={() => setImportModalOpen(false)} className="px-4 py-2 text-sm border border-gray-200 rounded-lg hover:bg-gray-50">취소</button>
                 <button
@@ -644,13 +719,9 @@ function Toggle({ value, onChange }: { value: boolean; onChange: (v: boolean) =>
   return (
     <button
       onClick={() => onChange(!value)}
-      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
-        value ? 'bg-blue-500' : 'bg-gray-200'
-      }`}
+      className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${value ? 'bg-blue-500' : 'bg-gray-200'}`}
     >
-      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${
-        value ? 'translate-x-4' : 'translate-x-1'
-      }`} />
+      <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${value ? 'translate-x-4' : 'translate-x-1'}`} />
     </button>
   )
 }
