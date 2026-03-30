@@ -122,17 +122,20 @@ export async function syncProductToAllChannels(
     }
 
     // 5. 동기화 실행
-    const result: SyncResult = await adapter.syncProduct(
+    const result = await (adapter.syncProduct as Function)(
       representative.platform_product_id,
       payload,
       businessId,
-    )
+    ) as SyncResult & { resolvedId?: string }
 
-    // 6. 매핑 상태 업데이트
-    const updatePayload = {
+    // 6. 매핑 상태 업데이트 (resolvedId가 있으면 platform_product_id도 자동 보정)
+    const updatePayload: Record<string, unknown> = {
       last_synced_at: new Date().toISOString(),
       last_sync_status: result.success ? 'success' : 'failed',
       last_sync_error: result.error ?? null,
+    }
+    if (result.resolvedId) {
+      updatePayload.platform_product_id = result.resolvedId
     }
     for (const m of groupMappings) {
       await supabase.from('channel_product_mappings').update(updatePayload).eq('id', m.id)

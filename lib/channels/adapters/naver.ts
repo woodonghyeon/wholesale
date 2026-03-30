@@ -33,21 +33,42 @@ interface NaverProductResponse {
   }>
 }
 
-function buildOptionLabel(combo: NonNullable<NaverOriginProduct['optionInfo']>['optionCombinations'] extends Array<infer T> ? T : never): string {
-  return [combo.optionValue1, combo.optionValue2, combo.optionValue3]
+type OptionCombo = NonNullable<NaverOriginProduct['optionInfo']>['optionCombinations'] extends Array<infer T> ? T : never
+
+function buildOptionLabel(combo: OptionCombo): string {
+  return [(combo as any).optionValue1, (combo as any).optionValue2, (combo as any).optionValue3]
     .filter(Boolean)
     .join(' / ')
 }
 
 export class NaverChannelAdapter implements ChannelAdapter {
   /**
-   * channelProductNo → originProductNo 변환 (404 fallback용)
-   * POST /search로 전체 상품 조회 후 channelProductNo 매칭
+   * channelProductNo → originProductNo 변환
+   *
+   * 방법 1: GET /channel-products/{channelProductNo} — 직접 조회 (가장 빠름)
+   * 방법 2: POST /search 전체 탐색 — fallback
    */
   private async resolveOriginProductNo(
     channelProductId: string,
     headers: Record<string, string>,
   ): Promise<string | null> {
+    // ── 방법 1: 채널 상품 직접 조회 ──────────────────────────────
+    try {
+      const res = await fetch(
+        `${BASE_URL}/external/v1/products/channel-products/${channelProductId}`,
+        { headers },
+      )
+      if (res.ok) {
+        const data = await res.json()
+        // 응답 구조: { originProductNo } 또는 { originProduct: { ... } }
+        const originNo = data.originProductNo ?? data.originProduct?.originProductNo
+        if (originNo) return String(originNo)
+      }
+    } catch {
+      // 무시 후 방법 2로 진행
+    }
+
+    // ── 방법 2: 전체 상품 검색으로 channelProductNo 매칭 ─────────
     try {
       let page = 1
       while (true) {
@@ -58,63 +79,84 @@ export class NaverChannelAdapter implements ChannelAdapter {
         })
         if (!res.ok) return null
         const data = await res.json()
-        const contents: Array<{ originProductNo: number; channelProducts?: Array<{ channelProductNo: number }> }> =
-          data.contents ?? []
+        const contents: Array<{
+          originProductNo: number
+          channelProducts?: Array<{ channelProductNo: number }>
+        }> = data.contents ?? []
+
         for (const item of contents) {
+          // originProductNo 직접 일치 확인 (실수로 originNo를 channelNo로 착각한 경우 대비)
+          if (String(item.originProductNo) === channelProductId) {
+            return String(item.originProductNo)
+          }
           for (const ch of item.channelProducts ?? []) {
             if (String(ch.channelProductNo) === channelProductId) {
               return String(item.originProductNo)
             }
           }
         }
+
         const total: number = data.totalElements ?? 0
         if (contents.length === 0 || page * 100 >= total) break
         page++
       }
     } catch {
-      // 검색 실패는 무시하고 null 반환
+      // 검색 실패 무시
     }
+
     return null
   }
 
-  /** 네이버 상품 전체 데이터 조회 */
-  private async fetchProduct(platformProductId: string, businessId?: string): Promise<NaverProductResponse> {
+  /**
+   * 네이버 상품 전체 데이터 조회
+   * 반환값: { data: 상품 전체 JSON, actualId: 실제 사용된 originProductNo }
+   */
+  private async fetchProduct(
+    platformProductId: string,
+    businessId?: string,
+  ): Promise<{ data: NaverProductResponse; actualId: string }> {
     const headers = await getNaverAuthHeaders(businessId)
+
     const res = await fetch(
       `${BASE_URL}/external/v1/products/origin-products/${platformProductId}`,
-      { headers }
+      { headers },
     )
-    if (!res.ok) {
-      // 404인 경우 channelProductNo로 저장됐을 수 있으므로 originProductNo 탐색
-      if (res.status === 404) {
-        const originId = await this.resolveOriginProductNo(platformProductId, headers)
-        if (originId && originId !== platformProductId) {
-          const res2 = await fetch(
-            `${BASE_URL}/external/v1/products/origin-products/${originId}`,
-            { headers }
-          )
-          if (res2.ok) return res2.json()
+
+    if (res.ok) {
+      return { data: await res.json(), actualId: platformProductId }
+    }
+
+    // 404 → channelProductNo로 저장됐을 수 있으므로 originProductNo 탐색
+    if (res.status === 404) {
+      const originId = await this.resolveOriginProductNo(platformProductId, headers)
+      if (originId) {
+        const res2 = await fetch(
+          `${BASE_URL}/external/v1/products/origin-products/${originId}`,
+          { headers },
+        )
+        if (res2.ok) {
+          return { data: await res2.json(), actualId: originId }
         }
       }
-      const text = await res.text()
-      throw new Error(`네이버 상품 조회 실패 (${res.status}): ${text}`)
     }
-    return res.json()
+
+    const text = await res.text()
+    throw new Error(`네이버 상품 조회 실패 (${res.status}): ${text}`)
   }
 
   /** 플랫폼 상품 조회 (매핑 설정 + 미리보기용) */
   async getProduct(platformProductId: string, businessId?: string): Promise<PlatformProduct> {
-    const data = await this.fetchProduct(platformProductId, businessId)
+    const { data, actualId } = await this.fetchProduct(platformProductId, businessId)
     const origin = data.originProduct
     const combos = origin.optionInfo?.optionCombinations ?? []
 
     return {
-      platformProductId,
-      name: String(origin.name ?? ''),
+      platformProductId: actualId,
+      name: String((origin as any).name ?? ''),
       price: origin.salePrice ?? 0,
       options: combos.map(c => ({
         platformOptionId: String(c.id),
-        label: buildOptionLabel(c as any),
+        label: buildOptionLabel(c as OptionCombo),
         inventory: c.stockQuantity ?? 0,
         addPrice: c.price ?? 0,
       })),
@@ -127,15 +169,14 @@ export class NaverChannelAdapter implements ChannelAdapter {
     platformProductId: string,
     payload: SyncPayload,
     businessId?: string,
-  ): Promise<SyncResult> {
+  ): Promise<SyncResult & { resolvedId?: string }> {
     try {
-      // 1. 현재 상품 전체 데이터 조회
-      const data = await this.fetchProduct(platformProductId, businessId) as NaverProductResponse
+      // 1. 현재 상품 전체 데이터 조회 (actualId = 실제 originProductNo)
+      const { data, actualId } = await this.fetchProduct(platformProductId, businessId)
 
       // 2. 수정할 필드만 교체
       if (payload.price !== undefined) {
         data.originProduct.salePrice = payload.price
-        // 채널 상품 가격도 동기화
         if (data.channelProducts?.length) {
           for (const cp of data.channelProducts) {
             cp.salePrice = payload.price
@@ -147,7 +188,6 @@ export class NaverChannelAdapter implements ChannelAdapter {
         const combos = data.originProduct.optionInfo?.optionCombinations
 
         if (!combos || combos.length === 0) {
-          // 옵션 없는 상품: null 키로 수량 조회
           const qty = payload.inventory.get(null)
           if (qty !== undefined) {
             data.originProduct.stockQuantity = qty
@@ -158,25 +198,22 @@ export class NaverChannelAdapter implements ChannelAdapter {
             }
           }
         } else {
-          // 옵션 있는 상품: platformOptionId로 해당 조합 찾아 수량 수정
           for (const combo of combos) {
             const qty = payload.inventory.get(String(combo.id))
-            if (qty !== undefined) {
-              combo.stockQuantity = qty
-            }
+            if (qty !== undefined) (combo as any).stockQuantity = qty
           }
         }
       }
 
-      // 3. 수정된 전체 데이터로 PUT
+      // 3. PUT 요청 — actualId 사용 (resolveOriginProductNo로 보정된 ID)
       const headers = await getNaverAuthHeaders(businessId)
       const putRes = await fetch(
-        `${BASE_URL}/external/v1/products/origin-products/${platformProductId}`,
+        `${BASE_URL}/external/v1/products/origin-products/${actualId}`,
         {
           method: 'PUT',
           headers,
           body: JSON.stringify(data),
-        }
+        },
       )
 
       if (!putRes.ok) {
@@ -184,7 +221,11 @@ export class NaverChannelAdapter implements ChannelAdapter {
         throw new Error(`네이버 상품 수정 실패 (${putRes.status}): ${text}`)
       }
 
-      return { success: true }
+      // actualId가 원래 ID와 다르면 호출자가 DB 업데이트할 수 있도록 반환
+      return {
+        success: true,
+        resolvedId: actualId !== platformProductId ? actualId : undefined,
+      }
     } catch (err) {
       return { success: false, error: (err as Error).message }
     }
@@ -231,4 +272,3 @@ export class NaverChannelAdapter implements ChannelAdapter {
 }
 
 export const naverAdapter = new NaverChannelAdapter()
-
