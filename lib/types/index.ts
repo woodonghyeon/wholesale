@@ -36,9 +36,13 @@ export interface Business {
   created_at: string
 }
 
+export type PlatformType = 'naver' | '11st' | 'gmarket' | 'auction' | 'own' | 'offline'
+export type SyncStatus = 'success' | 'failed' | 'pending'
+
 export interface Channel {
   id: string
   name: string
+  platform_type: PlatformType | null
   commission_rate: number
   payment_fee_rate: number
   shipping_fee: number
@@ -438,4 +442,71 @@ export interface ProductDefaultPartner {
   id: string
   product_id: string
   partner_id: string
+}
+
+// ══════════════════════════════════════
+// 15. 상품 옵션 타입
+// ══════════════════════════════════════
+
+export interface ProductOptionGroup {
+  id: string
+  product_id: string
+  name: string
+  display_order: number
+  created_at: string
+  values?: ProductOptionValue[]
+}
+
+export interface ProductOptionValue {
+  id: string
+  option_group_id: string
+  value: string
+  display_order: number
+  created_at: string
+}
+
+export interface ProductOptionCombination {
+  id: string
+  product_id: string
+  option_value_ids: string[]
+  label: string
+  sku: string | null
+  add_price: number
+  is_active: boolean
+  created_at: string
+}
+
+// ══════════════════════════════════════
+// 16. 채널 연동 타입
+// ══════════════════════════════════════
+
+export interface ChannelProductMapping {
+  id: string
+  business_id: string | null
+  product_id: string
+  option_combination_id: string | null
+  channel_id: string
+  platform_product_id: string
+  platform_option_id: string | null
+  sync_price: boolean
+  sync_inventory: boolean
+  last_synced_at: string | null
+  last_sync_status: SyncStatus | null
+  last_sync_error: string | null
+  created_at: string
+  channel?: Channel
+  combination?: ProductOptionCombination
+}
+
+export interface ChannelSyncLog {
+  id: string
+  business_id: string | null
+  product_id: string | null
+  channel_id: string | null
+  sync_type: 'price' | 'inventory' | 'both'
+  old_value: Record<string, unknown>
+  new_value: Record<string, unknown>
+  status: 'success' | 'failed'
+  error_msg: string | null
+  synced_at: string
 }

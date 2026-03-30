@@ -25,6 +25,60 @@ import type { NaverClaim } from './claims'
 // ── 증분 기준 시각 (프로세스 생존 동안 유지) ──────────────────────
 let lastSyncedAt: Date | null = null
 
+// ── DB 자격증명 기반 텔레그램 전송 ─────────────────────────────
+// env(TELEGRAM_BOT_TOKEN/CHAT_ID) 또는 business_api_settings DB 값 사용
+async function sendTelegramAuto(text: string): Promise<void> {
+  // 1) env 기반 전송 가능하면 그대로 사용
+  if (isTelegramConfigured()) {
+    await sendTelegram(text)
+    return
+  }
+
+  // 2) DB에서 telegram 자격증명이 있는 첫 번째 사업자 조회
+  const supabase = adminClient()
+  const { data: setting } = await supabase
+    .from('business_api_settings')
+    .select('credentials')
+    .eq('provider', 'telegram')
+    .eq('is_active', true)
+    .limit(1)
+    .maybeSingle()
+
+  const botToken = setting?.credentials?.bot_token?.trim()
+  const chatId   = setting?.credentials?.chat_id?.trim()
+  if (!botToken || !chatId) return
+
+  const MAX_LEN = 4096
+  async function sendChunk(chunk: string) {
+    const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text: chunk, parse_mode: 'HTML' }),
+    })
+    if (!res.ok) {
+      const err = await res.text()
+      throw new Error(`텔레그램 전송 실패 (${res.status}): ${err}`)
+    }
+  }
+
+  if (text.length <= MAX_LEN) {
+    await sendChunk(text)
+    return
+  }
+  const lines = text.split('\n')
+  let chunk = ''
+  for (const line of lines) {
+    const candidate = chunk ? chunk + '\n' + line : line
+    if (candidate.length > MAX_LEN) {
+      if (chunk) await sendChunk(chunk)
+      chunk = line.slice(0, MAX_LEN)
+    } else {
+      chunk = candidate
+    }
+  }
+  if (chunk) await sendChunk(chunk)
+}
+
 function adminClient() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -300,14 +354,12 @@ export async function runNaverAutoSync(): Promise<{
     `[Naver Sync] 신규 주문 ${newOrders.length}건 / 반품 ${newClaims.length}건`
   )
 
-  // 텔레그램 알림
-  if (isTelegramConfigured()) {
-    if (newOrders.length > 0) {
-      await sendTelegram(buildOrderAlert(newOrders.length, newOrders))
-    }
-    if (newClaims.length > 0) {
-      await sendTelegram(buildClaimAlert(newClaims.length, newClaims))
-    }
+  // 텔레그램 알림 (env 또는 DB 자격증명 자동 사용)
+  if (newOrders.length > 0) {
+    await sendTelegramAuto(buildOrderAlert(newOrders.length, newOrders))
+  }
+  if (newClaims.length > 0) {
+    await sendTelegramAuto(buildClaimAlert(newClaims.length, newClaims))
   }
 
   // DB 저장 (비동기, 실패해도 무관)
