@@ -94,6 +94,16 @@ export default function ChannelSyncPage() {
   const [editPriceId, setEditPriceId]   = useState<string | null>(null)
   const [editPriceVal, setEditPriceVal] = useState('')
 
+  // 플랫폼 ID 인라인 편집
+  const [editPidId, setEditPidId]   = useState<string | null>(null)
+  const [editPidVal, setEditPidVal] = useState('')
+
+  // 진단 모달
+  const [diagnoseModalOpen, setDiagnoseModalOpen] = useState(false)
+  const [diagnoseMappingId, setDiagnoseMappingId] = useState<string | null>(null)
+  const [diagnosing, setDiagnosing]               = useState(false)
+  const [diagnoseResult, setDiagnoseResult]       = useState<any>(null)
+
   // 플랫폼 상품 불러오기 모달
   const [importModalOpen, setImportModalOpen]     = useState(false)
   const [platformProducts, setPlatformProducts]   = useState<PlatformProduct[]>([])
@@ -253,6 +263,64 @@ export default function ChannelSyncPage() {
       ))
     } catch {
       toast.error('설정 변경 실패')
+    }
+  }
+
+  // ── 플랫폼 ID 수정 ──────────────────────────────────────────
+  async function savePidEdit(mappingId: string) {
+    const val = editPidVal.trim()
+    if (!val) { toast.error('ID를 입력하세요'); return }
+    try {
+      const res  = await fetch('/api/channels/mappings', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: mappingId, platform_product_id: val }),
+      })
+      const data = await res.json()
+      if (!data.success) throw new Error(data.error)
+      toast.success('플랫폼 ID 수정됨')
+      setMappings(prev => prev.map(m =>
+        m.mapping_id === mappingId ? { ...m, platform_product_id: val } : m
+      ))
+    } catch (e: any) {
+      toast.error(e.message)
+    } finally {
+      setEditPidId(null)
+    }
+  }
+
+  // ── 진단 실행 ────────────────────────────────────────────────
+  async function runDiagnose(mappingId: string) {
+    setDiagnoseMappingId(mappingId)
+    setDiagnoseModalOpen(true)
+    setDiagnoseResult(null)
+    setDiagnosing(true)
+    try {
+      const bizParam = selectedBusinessId && selectedBusinessId !== 'all'
+        ? `&business_id=${selectedBusinessId}` : ''
+      const res  = await fetch(`/api/channels/diagnose?mapping_id=${mappingId}${bizParam}`)
+      const data = await res.json()
+      setDiagnoseResult(data)
+
+      // 자동 보정 가능하면 즉시 적용
+      if (data.success && data.resolved_id) {
+        const stored = mappings.find(m => m.mapping_id === mappingId)?.platform_product_id
+        if (stored && data.resolved_id !== stored) {
+          await fetch('/api/channels/mappings', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: mappingId, platform_product_id: data.resolved_id }),
+          })
+          setMappings(prev => prev.map(m =>
+            m.mapping_id === mappingId ? { ...m, platform_product_id: data.resolved_id } : m
+          ))
+          toast.success(`ID 자동 보정: ${stored} → ${data.resolved_id}`)
+        }
+      }
+    } catch (e: any) {
+      setDiagnoseResult({ error: e.message })
+    } finally {
+      setDiagnosing(false)
     }
   }
 
@@ -485,9 +553,32 @@ export default function ChannelSyncPage() {
                         </div>
                       </td>
 
-                      {/* 플랫폼 ID */}
-                      <td className="px-4 py-3 text-gray-500 font-mono text-xs">
-                        {row.platform_product_id}
+                      {/* 플랫폼 ID (인라인 편집) */}
+                      <td className="px-4 py-3">
+                        {editPidId === row.mapping_id ? (
+                          <div className="flex items-center gap-1">
+                            <input
+                              value={editPidVal}
+                              onChange={e => setEditPidVal(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter')  savePidEdit(row.mapping_id)
+                                if (e.key === 'Escape') setEditPidId(null)
+                              }}
+                              className="w-32 border border-blue-300 rounded px-2 py-1 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-blue-500"
+                              autoFocus
+                            />
+                            <button onClick={() => savePidEdit(row.mapping_id)} className="text-blue-600 text-xs hover:underline">저장</button>
+                            <button onClick={() => setEditPidId(null)} className="text-gray-400 text-xs hover:underline">취소</button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => { setEditPidId(row.mapping_id); setEditPidVal(row.platform_product_id) }}
+                            className="text-gray-500 font-mono text-xs hover:text-blue-600 hover:underline"
+                            title="클릭하여 수정"
+                          >
+                            {row.platform_product_id}
+                          </button>
+                        )}
                       </td>
 
                       {/* 채널 가격 인라인 편집 */}
@@ -544,13 +635,20 @@ export default function ChannelSyncPage() {
 
                       {/* 액션 */}
                       <td className="px-4 py-3 text-right">
-                        <div className="flex items-center justify-end gap-2">
+                        <div className="flex items-center justify-end gap-1.5">
                           <button
                             onClick={() => syncOne(row.product_id)}
                             disabled={syncingIds.has(row.product_id)}
                             className="px-2.5 py-1 text-xs bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 disabled:opacity-50"
                           >
                             {syncingIds.has(row.product_id) ? '…' : '동기화'}
+                          </button>
+                          <button
+                            onClick={() => runDiagnose(row.mapping_id)}
+                            className="px-2.5 py-1 text-xs text-yellow-600 bg-yellow-50 hover:bg-yellow-100 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                            title="ID 진단 및 자동 보정"
+                          >
+                            진단
                           </button>
                           <button
                             onClick={() => deleteMapping(row.mapping_id)}
@@ -700,6 +798,94 @@ export default function ChannelSyncPage() {
             </div>
           </>
         )}
+      </Modal>
+
+      {/* ── 진단 모달 ──────────────────────────────────────────── */}
+      <Modal
+        open={diagnoseModalOpen}
+        onClose={() => setDiagnoseModalOpen(false)}
+        title="🔍 플랫폼 ID 진단"
+        size="xl"
+      >
+        {diagnosing ? (
+          <div className="py-12 text-center text-gray-400 text-sm">네이버 API 확인 중…</div>
+        ) : diagnoseResult ? (
+          <div className="space-y-4">
+            {/* 결과 요약 */}
+            {diagnoseResult.success ? (
+              <div className="flex items-start gap-3 p-3 bg-green-50 border border-green-200 rounded-lg">
+                <span className="text-green-600 font-bold mt-0.5">✓</span>
+                <div>
+                  <p className="text-sm font-medium text-green-700">상품 조회 성공</p>
+                  <p className="text-xs text-green-600 mt-0.5">
+                    사용된 ID: <span className="font-mono font-bold">{diagnoseResult.resolved_id}</span>
+                    {diagnoseResult.steps?.stored_platform_product_id !== diagnoseResult.resolved_id && (
+                      <span className="ml-2 text-orange-600">
+                        (저장된 ID <span className="font-mono">{diagnoseResult.steps?.stored_platform_product_id}</span>에서 자동 보정됨)
+                      </span>
+                    )}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-start gap-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                <span className="text-red-500 font-bold mt-0.5">✗</span>
+                <div>
+                  <p className="text-sm font-medium text-red-700">상품을 찾을 수 없습니다</p>
+                  <p className="text-xs text-red-600 mt-0.5">
+                    저장된 ID: <span className="font-mono font-bold">{diagnoseResult.steps?.stored_platform_product_id}</span>
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* 단계별 결과 */}
+            <div>
+              <p className="text-xs font-medium text-gray-500 mb-2">진단 단계</p>
+              <div className="bg-gray-50 rounded-lg p-3 space-y-1.5 text-xs font-mono max-h-64 overflow-y-auto">
+                {Object.entries(diagnoseResult.steps ?? {}).map(([k, v]) => (
+                  <div key={k} className="flex gap-2">
+                    <span className="text-gray-400 shrink-0">{k}:</span>
+                    <span className={`text-gray-700 break-all ${
+                      String(v).includes('"ok":true') || k.includes('result') ? 'text-green-700' :
+                      String(v).includes('"ok":false') || k.includes('error') ? 'text-red-600' : ''
+                    }`}>
+                      {typeof v === 'object' ? JSON.stringify(v) : String(v)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 수동 ID 입력 */}
+            {!diagnoseResult.success && (
+              <div className="border-t border-gray-100 pt-4">
+                <p className="text-xs text-gray-500 mb-2">
+                  올바른 originProductNo를 직접 입력하여 수정할 수 있습니다
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="올바른 originProductNo 입력"
+                    value={editPidVal}
+                    onChange={e => setEditPidVal(e.target.value)}
+                    className="flex-1 border border-gray-200 rounded-lg px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <button
+                    onClick={async () => {
+                      if (!diagnoseMappingId || !editPidVal.trim()) return
+                      await savePidEdit(diagnoseMappingId)
+                      setDiagnoseModalOpen(false)
+                    }}
+                    className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                  >
+                    저장
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : null}
       </Modal>
     </div>
   )

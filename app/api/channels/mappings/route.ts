@@ -66,14 +66,15 @@ export async function POST(req: NextRequest) {
 export async function PATCH(req: NextRequest) {
   try {
     const body = await req.json()
-    const { id, channel_price, channel_name, sync_price, sync_inventory } = body
+    const { id, channel_price, channel_name, sync_price, sync_inventory, platform_product_id } = body
     if (!id) return NextResponse.json({ error: 'id 필수' }, { status: 400 })
 
     const updates: Record<string, unknown> = {}
-    if (channel_price !== undefined) updates.channel_price = channel_price === '' ? null : Number(channel_price)
-    if (channel_name  !== undefined) updates.channel_name  = channel_name  === '' ? null : channel_name
-    if (sync_price    !== undefined) updates.sync_price    = sync_price
-    if (sync_inventory !== undefined) updates.sync_inventory = sync_inventory
+    if (channel_price        !== undefined) updates.channel_price        = channel_price === '' ? null : Number(channel_price)
+    if (channel_name         !== undefined) updates.channel_name         = channel_name  === '' ? null : channel_name
+    if (sync_price           !== undefined) updates.sync_price           = sync_price
+    if (sync_inventory       !== undefined) updates.sync_inventory       = sync_inventory
+    if (platform_product_id  !== undefined) updates.platform_product_id  = platform_product_id
 
     const { data, error } = await adminClient()
       .from('channel_product_mappings')
