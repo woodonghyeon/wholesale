@@ -14,7 +14,7 @@ function adminClient() {
 export async function GET() {
   const { data, error } = await adminClient()
     .from('channels')
-    .select('id, name, platform_type, commission_rate, delivery_fee, sort_order')
+    .select('id, name, platform_type, commission_rate, shipping_fee, sort_order')
     .order('sort_order')
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
