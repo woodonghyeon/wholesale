@@ -341,18 +341,27 @@ export default function SettingsPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 text-gray-500 text-xs">
                     <tr>
-                      {['채널명','플랫폼 수수료(%)','결제 수수료(%)','기본 배송비',''].map(h => (
+                      {['채널명','플랫폼 유형','플랫폼 수수료(%)','결제 수수료(%)','기본 배송비',''].map(h => (
                         <th key={h} className="px-4 py-3 text-left font-medium">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
                     {channels.length === 0 && (
-                      <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">채널이 없습니다</td></tr>
+                      <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">채널이 없습니다</td></tr>
                     )}
                     {channels.map(c => (
                       <tr key={c.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3 font-medium">{c.name}</td>
+                        <td className="px-4 py-3">
+                          {c.platform_type ? (
+                            <span className={`text-xs px-2 py-0.5 rounded-full text-white ${
+                              { naver:'bg-green-500', '11st':'bg-red-500', gmarket:'bg-yellow-500', auction:'bg-orange-500', own:'bg-blue-500', offline:'bg-gray-400' }[c.platform_type] ?? 'bg-gray-400'
+                            }`}>
+                              {{ naver:'네이버', '11st':'11번가', gmarket:'G마켓', auction:'옥션', own:'자사몰', offline:'오프라인' }[c.platform_type] ?? c.platform_type}
+                            </span>
+                          ) : <span className="text-xs text-gray-300">미설정</span>}
+                        </td>
                         <td className="px-4 py-3">{c.commission_rate}%</td>
                         <td className="px-4 py-3">{c.payment_fee_rate}%</td>
                         <td className="px-4 py-3">{c.shipping_fee.toLocaleString()}원</td>
@@ -673,6 +682,21 @@ export default function SettingsPage() {
         <div className="space-y-4">
           <div><label className={labelCls}>채널명 *</label>
             <input className={inputCls} value={editCh.name ?? ''} onChange={e => setEditCh(p => ({ ...p, name: e.target.value }))} /></div>
+          <div><label className={labelCls}>플랫폼 유형</label>
+            <select
+              className={inputCls}
+              value={editCh.platform_type ?? ''}
+              onChange={e => setEditCh(p => ({ ...p, platform_type: e.target.value || null }))}
+            >
+              <option value="">선택 안 함 (오프라인/기타)</option>
+              <option value="naver">네이버 스마트스토어</option>
+              <option value="11st">11번가</option>
+              <option value="gmarket">G마켓</option>
+              <option value="auction">옥션</option>
+              <option value="own">자사몰</option>
+              <option value="offline">오프라인</option>
+            </select>
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <div><label className={labelCls}>플랫폼 수수료 (%)</label>
               <input type="number" step="0.01" className={inputCls} value={editCh.commission_rate ?? 0} onChange={e => setEditCh(p => ({ ...p, commission_rate: parseFloat(e.target.value) }))} /></div>
