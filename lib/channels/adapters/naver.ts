@@ -189,6 +189,46 @@ export class NaverChannelAdapter implements ChannelAdapter {
       return { success: false, error: (err as Error).message }
     }
   }
+
+  /** 네이버 전체 상품 목록 조회 (POST /search 페이지네이션) */
+  async listProducts(businessId?: string): Promise<PlatformProduct[]> {
+    const headers = await getNaverAuthHeaders(businessId)
+    const all: PlatformProduct[] = []
+    let page = 1
+
+    while (true) {
+      const res = await fetch(`${BASE_URL}/external/v1/products/search`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ page, size: 100 }),
+      })
+      if (!res.ok) break
+
+      const data = await res.json()
+      const contents: Array<{
+        originProductNo: number
+        name?: string
+        salePrice?: number
+        channelProducts?: Array<{ channelProductNo: number }>
+      }> = data.contents ?? []
+
+      for (const item of contents) {
+        all.push({
+          platformProductId: String(item.originProductNo),
+          name: item.name ?? '',
+          price: item.salePrice ?? 0,
+          options: [],
+        })
+      }
+
+      const total: number = data.totalElements ?? 0
+      if (contents.length === 0 || page * 100 >= total) break
+      page++
+    }
+
+    return all
+  }
 }
 
 export const naverAdapter = new NaverChannelAdapter()
+

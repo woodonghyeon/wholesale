@@ -26,6 +26,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: '/transactions', label: '거래 입력' },
       { href: '/sales', label: '매출 현황' },
       { href: '/channel-sales', label: '채널별 매출' },
+      { href: '/channel-sync', label: '채널 연동 관리' },
       { href: '/quotes', label: '견적·발주' },
       { href: '/returns', label: '반품 관리' },
       { href: '/shipping', label: '송장 관리' },

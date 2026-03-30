@@ -31,4 +31,7 @@ export interface ChannelAdapter {
 
   /** 가격/재고 동기화 (Read-Modify-Write) */
   syncProduct(platformProductId: string, payload: SyncPayload, businessId?: string): Promise<SyncResult>
+
+  /** 플랫폼 전체 상품 목록 조회 (일괄 연동용, 선택 구현) */
+  listProducts?(businessId?: string): Promise<PlatformProduct[]>
 }

@@ -87,15 +87,19 @@ export async function syncProductToAllChannels(
 
     const payload: SyncPayload = {}
 
-    // 가격 결정: 채널별 가격 우선, 없으면 기본가
+    // 가격 결정: 매핑 channel_price > product_prices > 상품 기본가
     if (doPrice && product) {
-      const { data: channelPrice } = await supabase
-        .from('product_prices')
-        .select('unit_price')
-        .eq('product_id', productId)
-        .eq('channel_id', representative.channel_id)
-        .maybeSingle()
-      payload.price = channelPrice?.unit_price ?? product.sell_price
+      if (representative.channel_price != null) {
+        payload.price = representative.channel_price
+      } else {
+        const { data: channelPrice } = await supabase
+          .from('product_prices')
+          .select('unit_price')
+          .eq('product_id', productId)
+          .eq('channel_id', representative.channel_id)
+          .maybeSingle()
+        payload.price = channelPrice?.unit_price ?? product.sell_price
+      }
     }
 
     // 재고 매핑
